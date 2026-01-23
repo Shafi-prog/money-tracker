@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2019",
+    "module": "commonjs",
+    "lib": ["ES2019"],
+    "checkJs": true,
+    "maxNodeModuleJsDepth": 2,
+    "experimentalDecorators": true
+  },
+  "include": [
+    "*.js"
+  ],
+  "exclude": [
+    "node_modules"
+  ],
+  "typeAcquisition": {
+    "enable": true,
+    "include": [
+      "@types/google-apps-script"
+    ]
+  }
+}

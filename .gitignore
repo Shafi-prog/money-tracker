@@ -1,0 +1,41 @@
+# Node modules
+node_modules/
+package-lock.json
+
+# CLASP credentials (IMPORTANT: DO NOT COMMIT!)
+.clasprc.json
+.clasp.json
+
+# Google Apps Script pull files
+.gs
+
+# Logs
+*.log
+npm-debug.log*
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE files
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+.temp/
+
+# Environment variables (if you use them)
+.env
+.env.local
+
+# Build outputs
+dist/
+build/

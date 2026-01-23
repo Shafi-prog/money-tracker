@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>System Test Report - SJA Money Tracker</title>
+  <meta charset="utf-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+      direction: rtl;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 20px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      overflow: hidden;
+    }
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 30px;
+      text-align: center;
+    }
+    .header h1 { font-size: 32px; margin-bottom: 10px; }
+    .header p { opacity: 0.9; }
+    .content { padding: 30px; }
+    .test-group {
+      margin-bottom: 30px;
+      border: 2px solid #e0e0e0;
+      border-radius: 10px;
+      padding: 20px;
+    }
+    .test-group h2 {
+      color: #667eea;
+      margin-bottom: 15px;
+      font-size: 20px;
+    }
+    .test-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px;
+      margin: 8px 0;
+      border-radius: 8px;
+      background: #f8f9fa;
+    }
+    .test-item.pass { background: #d4edda; border-left: 4px solid #28a745; }
+    .test-item.fail { background: #f8d7da; border-left: 4px solid #dc3545; }
+    .test-item.warn { background: #fff3cd; border-left: 4px solid #ffc107; }
+    .test-name { font-weight: 500; }
+    .test-status { font-weight: bold; }
+    .pass .test-status { color: #28a745; }
+    .fail .test-status { color: #dc3545; }
+    .warn .test-status { color: #ffc107; }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+    .summary-card {
+      padding: 20px;
+      border-radius: 10px;
+      text-align: center;
+      color: white;
+    }
+    .summary-card.success { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); }
+    .summary-card.danger { background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%); }
+    .summary-card.warning { background: linear-gradient(135deg, #f2994a 0%, #f2c94c 100%); }
+    .summary-card.info { background: linear-gradient(135deg, #4e54c8 0%, #8f94fb 100%); }
+    .summary-card h3 { font-size: 36px; margin-bottom: 5px; }
+    .summary-card p { opacity: 0.9; }
+    .loader { 
+      text-align: center; 
+      padding: 60px;
+      color: #667eea;
+    }
+    .loader .spinner {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #667eea;
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 20px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .button {
+      display: inline-block;
+      padding: 12px 24px;
+      background: #667eea;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    .button:hover { background: #764ba2; transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.2); }
+    .actions { text-align: center; margin: 20px 0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🧪 System Test Report</h1>
+      <p>SJA Money Tracker - Automated Validation</p>
+    </div>
+    
+    <div class="content">
+      <div class="actions">
+        <button class="button" onclick="runTests()">▶️ Run Tests</button>
+        <button class="button" onclick="location.reload()">🔄 Reload</button>
+      </div>
+      
+      <div id="results">
+        <div class="loader">
+          <div class="spinner"></div>
+          <p>Click "Run Tests" to start validation...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function runTests() {
+      document.getElementById('results').innerHTML = '<div class="loader"><div class="spinner"></div><p>Running comprehensive tests...</p></div>';
+      
+      // Call backend test function
+      google.script.run
+        .withSuccessHandler(displayResults)
+        .withFailureHandler(function(err) {
+          document.getElementById('results').innerHTML = '<div class="test-item fail"><span class="test-name">System Error</span><span class="test-status">❌ ' + err.message + '</span></div>';
+        })
+        .VALIDATE_COMPLETE_SYSTEM();
+    }
+    
+    function displayResults(report) {
+      var html = '';
+      
+      // Summary cards
+      var successRate = Math.round((report.passed / (report.passed + report.failed)) * 100);
+      html += '<div class="summary">';
+      html += '<div class="summary-card success"><h3>' + report.passed + '</h3><p>✅ Passed</p></div>';
+      html += '<div class="summary-card danger"><h3>' + report.failed + '</h3><p>❌ Failed</p></div>';
+      html += '<div class="summary-card warning"><h3>' + report.warnings.length + '</h3><p>⚠️ Warnings</p></div>';
+      html += '<div class="summary-card info"><h3>' + successRate + '%</h3><p>📊 Success Rate</p></div>';
+      html += '</div>';
+      
+      // Critical Issues
+      if (report.criticalIssues.length > 0) {
+        html += '<div class="test-group">';
+        html += '<h2>🔴 Critical Issues (' + report.criticalIssues.length + ')</h2>';
+        report.criticalIssues.forEach(function(issue) {
+          html += '<div class="test-item fail"><span class="test-name">' + issue + '</span><span class="test-status">❌ CRITICAL</span></div>';
+        });
+        html += '</div>';
+      }
+      
+      // Sheets Validation
+      html += '<div class="test-group">';
+      html += '<h2>📊 Sheets Validation</h2>';
+      for (var sheet in report.sheetsValidation) {
+        var status = report.sheetsValidation[sheet];
+        var cssClass = status.indexOf('✅') >= 0 ? 'pass' : (status.indexOf('❌') >= 0 ? 'fail' : 'warn');
+        html += '<div class="test-item ' + cssClass + '"><span class="test-name">' + sheet + '</span><span class="test-status">' + status + '</span></div>';
+      }
+      html += '</div>';
+      
+      // Functions Validation
+      html += '<div class="test-group">';
+      html += '<h2>⚙️ Backend Functions</h2>';
+      for (var func in report.functionsValidation) {
+        var status = report.functionsValidation[func];
+        var cssClass = status.indexOf('✅') >= 0 ? 'pass' : 'fail';
+        html += '<div class="test-item ' + cssClass + '"><span class="test-name">' + func + '()</span><span class="test-status">' + status + '</span></div>';
+      }
+      html += '</div>';
+      
+      // Frontend-Backend Sync
+      html += '<div class="test-group">';
+      html += '<h2>🔄 Frontend-Backend Integration</h2>';
+      for (var test in report.frontendBackendSync) {
+        var status = report.frontendBackendSync[test];
+        var cssClass = status.indexOf('✅') >= 0 ? 'pass' : (status.indexOf('❌') >= 0 ? 'fail' : 'warn');
+        html += '<div class="test-item ' + cssClass + '"><span class="test-name">' + test + '</span><span class="test-status">' + status + '</span></div>';
+      }
+      html += '</div>';
+      
+      // Warnings
+      if (report.warnings.length > 0) {
+        html += '<div class="test-group">';
+        html += '<h2>⚠️ Warnings (' + report.warnings.length + ')</h2>';
+        report.warnings.forEach(function(warning) {
+          html += '<div class="test-item warn"><span class="test-name">' + warning + '</span><span class="test-status">⚠️ WARNING</span></div>';
+        });
+        html += '</div>';
+      }
+      
+      document.getElementById('results').innerHTML = html;
+    }
+  </script>
+</body>
+</html>

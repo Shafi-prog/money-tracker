@@ -1,0 +1,433 @@
+
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>متابعة المصاريف المالية</title>
+  <style>
+    :root{--p:#0b5;--bg:#f7f7fb;--card:#fff;--muted:#666;--b:#e8e8ef}
+    body{font-family:system-ui,Segoe UI,Tahoma,Arial;margin:18px;background:var(--bg);color:#111}
+    .top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+    .brand{display:flex;align-items:center;gap:10px}
+    .logo{width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,var(--p),#19d);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800}
+    .title{font-size:18px;font-weight:800}
+    .subtitle{color:var(--muted);font-size:13px}
+    .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
+    .tab{padding:10px 12px;border:1px solid var(--b);border-radius:12px;background:var(--card);cursor:pointer}
+    .tab.active{background:var(--p);color:#fff;border-color:var(--p)}
+    .card{background:var(--card);border:1px solid var(--b);border-radius:14px;padding:12px;margin:10px 0}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    input,select,button,textarea{padding:9px;border:1px solid #ddd;border-radius:10px}
+    textarea{width:100%;min-height:110px}
+    button{cursor:pointer;background:var(--p);color:#fff;border:none}
+    button.secondary{background:#333}
+    button:disabled{opacity:.55;cursor:not-allowed}
+    table{width:100%;border-collapse:collapse}
+    th,td{border-bottom:1px solid #eee;padding:8px;text-align:right;vertical-align:top}
+    th{background:#f3f3f3}
+    .kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
+    .box{background:#fbfffd;border:1px solid #d8ffe6;border-radius:14px;padding:10px}
+    .muted{color:var(--muted)}
+    .danger{color:#c00}
+    .badge{display:inline-block;padding:2px 8px;border-radius:999px;background:#eef; border:1px solid #dde; font-size:12px}
+  </style>
+</head>
+<body>
+
+<div class="top">
+  <div class="brand">
+    <div class="logo">ش</div>
+    <div>
+      <div class="title">متابعة المصاريف المالية</div>
+      <div class="subtitle">لوحة واحدة لإدارة المصاريف • تقارير • تصنيفات • اختبارات • تشغيل الصف</div>
+    </div>
+  </div>
+  <div class="row">
+    <input id="pw" placeholder="كلمة مرور الواجهة (إن وُجدت)"/>
+    <button onclick="login()">دخول</button>
+    <span id="authState" class="badge">غير مسجّل</span>
+  </div>
+</div>
+
+<div class="card">
+  <div class="row">
+    <a class="tab" href="?page=dashboard">لوحة متقدمة</a>
+    <a class="tab" href="?page=details">تفاصيل</a>
+    <a class="tab" href="?page=reports">تقارير</a>
+    <a class="tab" href="?page=settings">إعدادات</a>
+  </div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" data-tab="dash" onclick="switchTab('dash')">لوحة التحكم</div>
+  <div class="tab" data-tab="tx" onclick="switchTab('tx')">العمليات</div>
+  <div class="tab" data-tab="rep" onclick="switchTab('rep')">التقارير والطباعة</div>
+  <div class="tab" data-tab="tests" onclick="switchTab('tests')">الاختبارات</div>
+  <div class="tab" data-tab="ops" onclick="switchTab('ops')">تشغيل النظام</div>
+<div class="tab" data-tab="accounts" onclick="switchTab('accounts')">الحسابات</div>
+<div class="tab" data-tab="templates" onclick="switchTab('templates')">قوالب الرسائل</div>
+</div>
+
+<div id="dash" class="panel">
+  <div class="card">
+    <div class="row">
+      <button onclick="loadDashboard()">تحديث لوحة التحكم</button>
+      <span class="muted" id="dashNote"></span>
+    </div>
+  </div>
+  <div class="card"><div class="kpi" id="kpi"></div></div>
+  <div class="card">
+    <h3>التكرار المتجاهل (آخر ٧ أيام)</h3>
+    <div id="dup7"></div>
+  </div>
+</div>
+
+<div id="tx" class="panel" style="display:none">
+  <div class="card">
+    <div class="row">
+      <button onclick="loadTx()">تحديث آخر العمليات</button>
+      <button class="secondary" onclick="exportCsv()">تصدير CSV (آخر 200)</button>
+      <span class="muted" id="txNote"></span>
+    </div>
+  </div>
+  <div class="card"><h3>آخر العمليات + تغيير تصنيف سريع</h3><div id="latest">—</div></div>
+</div>
+
+<div id="rep" class="panel" style="display:none">
+  <div class="card">
+    <div class="row">
+      <select id="repMode">
+        <option value="today">اليوم</option>
+        <option value="week">الأسبوع</option>
+        <option value="month" selected>الشهر</option>
+      </select>
+      <button onclick="printReport()">عرض وطباعة</button>
+      <span class="muted" id="repNote"></span>
+    </div>
+  </div>
+  <div class="card">
+    <iframe id="repFrame" style="width:100%;height:520px;border:1px solid #eee;border-radius:12px;background:#fff"></iframe>
+  </div>
+</div>
+
+<div id="tests" class="panel" style="display:none">
+  <div class="card">
+    <div class="row">
+      <select id="testName">
+        <option value="test_11_dedup_sample_pos">اختبار 11: Dedup</option>
+        <option value="test_12_queue_enqueue_only">اختبار 12: Queue enqueue</option>
+        <option value="test_12b_queue_run_worker_once">اختبار 12B: Queue worker</option>
+        <option value="test_13_dashboard_v2_rebuild">اختبار 13: Dashboard_v2</option>
+        <option value="test_99_run_all_sov1_tests">تشغيل كل الاختبارات</option>
+      </select>
+      <button onclick="runTest()">تشغيل</button>
+      <span id="testNote" class="muted"></span>
+    </div>
+    <div id="testResult" class="card"></div>
+  </div>
+</div>
+
+<div id="accounts" class="panel" style="display:none">
+  <div class="card">
+    <h3>تعريف الحسابات</h3>
+    <div class="row">
+      <button onclick="loadAccounts()">تحديث</button>
+      <span class="muted" id="accNote"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h4>إضافة / تعديل حساب</h4>
+    <div class="row">
+      <input id="accRow" placeholder="row (اتركه فارغ للإضافة)" style="width:210px"/>
+      <input id="accName" placeholder="الاسم" style="min-width:180px"/>
+      <input id="accType" placeholder="النوع (بنك/محفظة/بطاقة)" style="min-width:180px"/>
+      <input id="accLast4" placeholder="الرقم/آخر4" style="min-width:130px"/>
+      <input id="accOrg" placeholder="الجهة (AlrajhiBank...)" style="min-width:180px"/>
+      <input id="accAliases" placeholder="أسماء بديلة (بفواصل)" style="min-width:220px"/>
+      <label><input type="checkbox" id="accMine"/> هل حسابي؟</label>
+      <label><input type="checkbox" id="accInternal"/> تحويل داخلي؟</label>
+      <button onclick="saveAccount()">حفظ</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h4>قائمة الحسابات</h4>
+    <div id="accTable">—</div>
+  </div>
+</div>
+``
+
+<div id="templates" class="panel" style="display:none">
+  <div class="card">
+    <h3>قوالب الرسائل (Sms_Templates)</h3>
+    <div class="row">
+      <button onclick="loadTemplates()">تحديث</button>
+      <span class="muted" id="tplNote"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h4>إضافة / تعديل قالب</h4>
+    <div class="row">
+      <input id="tplRow" placeholder="row (اتركه فارغ للإضافة)" style="width:210px"/>
+      <input id="tplEnabled" placeholder="مفعل (true/false)" style="min-width:160px" value="true"/>
+      <input id="tplOrg" placeholder="الجهة (بنك/محفظة)" style="min-width:180px"/>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input id="tplMap" placeholder="map مثل: amount=1;merchant=2;card=3;date=4;time=5" style="min-width:560px;width:100%"/>
+      <button class="secondary" onclick="validateRegex()">تحقق Regex</button>
+      <button onclick="saveTemplate()">حفظ</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <textarea id="tplRegex" placeholder="Regex هنا..." style="width:100%;min-height:120px"></textarea>
+    </div>
+  </div>
+
+  <div class="card">
+    <h4>القوالب الحالية</h4>
+    <div id="tplTable">—</div>
+  </div>
+</div>
+``
+
+
+<div id="ops" class="panel" style="display:none">
+  <div class="card">
+    <h3>تشغيل/صيانة</h3>
+    <div class="row">
+      <button onclick="runWorker()">تشغيل العامل مرة واحدة</button>
+      <button class="secondary" onclick="rebuildDash()">إعادة بناء Dashboard_v2</button>
+      <span class="muted" id="opsNote"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+  let TOKEN = 'OPEN';
+  function esc(s){ return String(s||'').replace(/[&<>"]/g,c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
+  
+function loadAccounts(){
+  document.getElementById('accNote').textContent='جارٍ التحميل...';
+  google.script.run.withSuccessHandler(rows=>{
+    document.getElementById('accNote').textContent='تم';
+    if(!rows || !rows.length){ document.getElementById('accTable').innerHTML='لا توجد حسابات.'; return; }
+    let h='<table><thead><tr><th>row</th><th>الاسم</th><th>النوع</th><th>آخر4</th><th>الجهة</th><th>أسماء بديلة</th><th>حسابي</th><th>داخلي</th><th>حذف</th></tr></thead><tbody>';
+    rows.forEach(r=>{
+      h+=`<tr>
+        <td>${r.row}</td><td>${esc(r.name)}</td><td>${esc(r.type)}</td><td>${esc(r.last4)}</td>
+        <td>${esc(r.org)}</td><td>${esc(r.aliases)}</td><td>${r.isMine}</td><td>${r.isInternal}</td>
+        <td><button class="secondary" onclick="deleteAccount(${r.row})">حذف</button></td>
+      </tr>`;
+    });
+    h+='</tbody></table>';
+    document.getElementById('accTable').innerHTML=h;
+  }).withFailureHandler(err=>alert(err.message)).SOV1_UI_getAccounts_(TOKEN);
+}
+
+function saveAccount(){
+  const obj = {
+    row: document.getElementById('accRow').value.trim(),
+    name: document.getElementById('accName').value.trim(),
+    type: document.getElementById('accType').value.trim(),
+    last4: document.getElementById('accLast4').value.trim(),
+    org: document.getElementById('accOrg').value.trim(),
+    aliases: document.getElementById('accAliases').value.trim(),
+    isMine: document.getElementById('accMine').checked,
+    isInternal: document.getElementById('accInternal').checked
+  };
+  google.script.run.withSuccessHandler(()=>{
+    alert('تم الحفظ');
+    loadAccounts();
+  }).withFailureHandler(err=>alert(err.message)).SOV1_UI_upsertAccount_(TOKEN, obj);
+}
+
+function deleteAccount(row){
+  if(!confirm('حذف الحساب؟')) return;
+  google.script.run.withSuccessHandler(()=>loadAccounts())
+    .withFailureHandler(err=>alert(err.message))
+    .SOV1_UI_deleteAccount_(TOKEN, row);
+}
+
+function loadTemplates(){
+  document.getElementById('tplNote').textContent='جارٍ التحميل...';
+  google.script.run.withSuccessHandler(rows=>{
+    document.getElementById('tplNote').textContent='تم';
+    if(!rows || !rows.length){ document.getElementById('tplTable').innerHTML='لا توجد قوالب.'; return; }
+    let h='<table><thead><tr><th>row</th><th>مفعل</th><th>الجهة</th><th>map</th><th>حذف</th></tr></thead><tbody>';
+    rows.forEach(r=>{
+      h+=`<tr>
+        <td>${r.row}</td><td>${esc(r.enabled)}</td><td>${esc(r.org)}</td><td>${esc(r.map)}</td>
+        <td><button class="secondary" onclick="deleteTemplate(${r.row})">حذف</button></td>
+      </tr>`;
+    });
+    h+='</tbody></table>';
+    document.getElementById('tplTable').innerHTML=h;
+  }).withFailureHandler(err=>alert(err.message)).SOV1_UI_getTemplates_(TOKEN);
+}
+
+function validateRegex(){
+  const pattern = document.getElementById('tplRegex').value;
+  google.script.run.withSuccessHandler(r=>{
+    if(r.ok) alert('Regex صحيح ✅');
+    else alert('Regex غير صالح ❌\n'+r.error);
+  }).SOV1_UI_validateRegex_(pattern);
+}
+
+function saveTemplate(){
+  const obj = {
+    row: document.getElementById('tplRow').value.trim(),
+    enabled: document.getElementById('tplEnabled').value.trim(),
+    org: document.getElementById('tplOrg').value.trim(),
+    regex: document.getElementById('tplRegex').value.trim(),
+    map: document.getElementById('tplMap').value.trim()
+  };
+  google.script.run.withSuccessHandler(()=>{
+    alert('تم حفظ القالب');
+    loadTemplates();
+  }).withFailureHandler(err=>alert(err.message)).SOV1_UI_upsertTemplate_(TOKEN, obj);
+}
+
+function deleteTemplate(row){
+  if(!confirm('حذف القالب؟')) return;
+  google.script.run.withSuccessHandler(()=>loadTemplates())
+    .withFailureHandler(err=>alert(err.message))
+    .SOV1_UI_deleteTemplate_(TOKEN, row);
+}
+
+  function switchTab(id){
+    document.querySelectorAll('.panel').forEach(p=>p.style.display='none');
+    document.getElementById(id).style.display='block';
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    document.querySelector('.tab[data-tab="'+id+'"]').classList.add('active');
+  }
+
+  function login(){
+    const pw = document.getElementById('pw').value;
+    google.script.run.withSuccessHandler(res=>{
+      if(!res.ok){ alert(res.message||'فشل'); return; }
+      TOKEN = res.token;
+      document.getElementById('authState').textContent = 'مسجّل';
+      loadDashboard(); loadTx();
+    }).withFailureHandler(err=>alert(err.message)).SOV1_UI_auth_(pw);
+  }
+
+  function loadDashboard(){
+    document.getElementById('dashNote').textContent='جارٍ التحديث...';
+    google.script.run.withSuccessHandler(renderDash)
+      .withFailureHandler(err=>alert(err.message))
+      .SOV1_UI_getDashboard_(TOKEN);
+  }
+  function renderDash(data){
+    document.getElementById('dashNote').textContent='تم';
+    const k = data.kpi||{};
+    document.getElementById('kpi').innerHTML = `
+      <div class="box"><div class="muted">الدخل (هذا الشهر)</div><div><b>${(k.incomeM||0).toFixed(2)}</b> SAR</div></div>
+      <div class="box"><div class="muted">المصروف (هذا الشهر)</div><div><b>${(k.spendM||0).toFixed(2)}</b> SAR</div></div>
+      <div class="box"><div class="muted">الصافي</div><div><b>${(k.netM||0).toFixed(2)}</b> SAR</div></div>
+      <div class="box"><div class="muted">إجمالي المتبقي</div><div><b>${(k.totalRemain||0).toFixed(2)}</b> SAR</div></div>
+    `;
+    const dup = data.dup7d||[];
+    if(!dup.length){ document.getElementById('dup7').innerHTML='لا توجد تكرارات متجاهلة.'; return; }
+    let h='<table><thead><tr><th>التاريخ</th><th>العدد</th></tr></thead><tbody>';
+    dup.forEach(x=>h+=`<tr><td>${esc(x.day)}</td><td>${x.dup}</td></tr>`);
+    h+='</tbody></table>';
+    document.getElementById('dup7').innerHTML=h;
+  }
+
+  function loadTx(){
+    document.getElementById('txNote').textContent='جارٍ التحميل...';
+    google.script.run.withSuccessHandler(renderLatest)
+      .withFailureHandler(err=>alert(err.message))
+      .SOV1_UI_getLatest_(TOKEN, 60);
+  }
+  function renderLatest(rows){
+    document.getElementById('txNote').textContent='تم';
+    if(!rows || !rows.length){ document.getElementById('latest').innerHTML='لا توجد بيانات.'; return; }
+    let h='<table><thead><tr><th>الوقت</th><th>المبلغ</th><th>التاجر</th><th>التصنيف</th><th>تغيير التصنيف</th></tr></thead><tbody>';
+    rows.forEach(r=>{
+      h+=`<tr>
+        <td>${esc(r.date)}</td>
+        <td>${Number(r.amount||0).toFixed(2)}</td>
+        <td>${esc(r.merchant)}</td>
+        <td>${esc(r.category)}</td>
+        <td><select data-row="${r.row}" onchange="changeCat(this)"><option value="">— اختر —</option></select></td>
+      </tr>`;
+    });
+    h+='</tbody></table>';
+    document.getElementById('latest').innerHTML=h;
+
+    google.script.run.withSuccessHandler(cats=>{
+      document.querySelectorAll('select[data-row]').forEach(sel=>{
+        cats.forEach(c=>{
+          const opt=document.createElement('option'); opt.value=c; opt.textContent=c; sel.appendChild(opt);
+        });
+      });
+    }).withFailureHandler(err=>alert(err.message)).SOV1_UI_getCategories_(TOKEN);
+  }
+
+  function changeCat(sel){
+    const row = sel.getAttribute('data-row');
+    const cat = sel.value;
+    if(!cat) return;
+    sel.disabled=true;
+    google.script.run.withSuccessHandler(res=>{
+      alert('تم: '+res.from+' → '+res.to);
+      sel.disabled=false; loadTx();
+    }).withFailureHandler(err=>{
+      alert(err.message); sel.disabled=false;
+    }).SOV1_UI_changeCategory_(row, cat);
+  }
+
+  function printReport(){
+    document.getElementById('repNote').textContent='جارٍ التوليد...';
+    const mode = document.getElementById('repMode').value;
+    google.script.run.withSuccessHandler(html=>{
+      document.getElementById('repNote').textContent='جاهز للطباعة';
+      document.getElementById('repFrame').srcdoc = html;
+    }).withFailureHandler(err=>alert(err.message)).SOV1_UI_generateReportHtml_(TOKEN, mode);
+  }
+
+  function runTest(){
+    const t = document.getElementById('testName').value;
+    document.getElementById('testNote').textContent='جارٍ التشغيل...';
+    google.script.run.withSuccessHandler(res=>{
+      document.getElementById('testNote').textContent='تم';
+      document.getElementById('testResult').innerHTML =
+        `<b>${esc(res.test||'')}</b> — <span class="${res.status==='FAIL'?'danger':''}">${esc(res.status||'')}</span><br/>
+         <div class="muted">${esc(res.details||'')}</div>`;
+    }).withFailureHandler(err=>alert(err.message)).SOV1_UI_runTest_(TOKEN, t);
+  }
+
+  function exportCsv(){
+    google.script.run.withSuccessHandler(csv=>{
+      const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'transactions.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    }).withFailureHandler(err=>alert(err.message)).SOV1_UI_exportCsv_(TOKEN, 200);
+  }
+
+  function runWorker(){
+    document.getElementById('opsNote').textContent='جارٍ التشغيل...';
+    google.script.run.withSuccessHandler(()=>{ document.getElementById('opsNote').textContent='تم'; })
+      .withFailureHandler(err=>alert(err.message)).SOV1_processQueueBatch_();
+  }
+
+  function rebuildDash(){
+    document.getElementById('opsNote').textContent='جارٍ البناء...';
+    google.script.run.withSuccessHandler(()=>{ document.getElementById('opsNote').textContent='تم'; })
+      .withFailureHandler(err=>alert(err.message)).SOV1_rebuildDashboard_v2();
+  }
+
+  // تشغيل تلقائي (بدون كلمة مرور إذا UI_PASSWORD فارغة)
+  login();
+</script>
+
+</body>
+</html>
+``

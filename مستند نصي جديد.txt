@@ -1,0 +1,2336 @@
+config,gs
+
+/********** Sovereign V120 â€” R3.3 | Config.gs **********/
+
+/** ENV ظ…ظ† Script Properties */
+const ENV = (function () {
+  var p = PropertiesService.getScriptProperties();
+  return {
+    OWNER: p.getProperty('OWNER') || 'ط¯. ط´ط§ظپظٹ',
+    OWN_ACCOUNTS: (p.getProperty('OWN_ACCOUNTS') || '')
+      .split(',')
+      .map(function (s) { return s.trim(); })
+      .filter(function (x) { return !!x; }),
+
+    TELEGRAM_TOKEN: p.getProperty('TELEGRAM_TOKEN') || '',
+    GROQ_KEY: p.getProperty('GROQ_KEY') || '',
+    GEMINI_KEY: p.getProperty('GEMINI_KEY') || '',
+
+    SHEET_ID: p.getProperty('SHEET_ID') || '',
+    CHAT_ID: p.getProperty('CHAT_ID') || '',
+    TG_SECRET_TOKEN: p.getProperty('TG_SECRET_TOKEN') || '',
+    INGRESS_SECRET: p.getProperty('INGRESS_SECRET') || '',
+    WEBAPP_URL: p.getProperty('WEBAPP_URL') || '',
+    WEBAPP_URL_DIRECT: p.getProperty('WEBAPP_URL_DIRECT') || ''
+  };
+})();
+
+function _ss() {
+  return SpreadsheetApp.openById(ENV.SHEET_ID);
+}
+
+function _sheet(name) {
+  var ss = _ss();
+  return ss.getSheetByName(name) || ss.insertSheet(name);
+}
+``
+
+Utlis.gs
+
+/********** Sovereign V120 â€” R3.3 | Utils.gs **********/
+
+function safeNotify(msg, optChatId) {
+  try {
+    SpreadsheetApp.getUi().alert(msg);
+    return;
+  } catch (e) { /* ignore */ }
+
+  try {
+    sendTelegram_(optChatId || ENV.CHAT_ID, msg);
+  } catch (e2) { /* ignore */ }
+
+  console.log(msg);
+}
+
+/** ظ…ظڈط­ظ„ظ‘ظ„ ظ…ط¯ط®ظ„ط§طھ ط¹ط§ظ…: Telegram JSON ط£ظˆ JSON ط¹ط§ظ… {text:"..."} ط£ظˆ ظ†طµ ط¹ط§ط¯ظٹ */
+function _parseIncoming_(raw) {
+  if (!raw) return { kind: 'none' };
+  var s = String(raw).trim();
+
+  if (s.charAt(0) === '{') {
+    try {
+      var obj = JSON.parse(s);
+
+      // Telegram-like?
+      if (obj.update_id || obj.message || obj.channel_post || obj.callback_query) {
+        return { kind: 'telegram', update: obj };
+      }
+
+      // Generic JSON -> text/body/message/content
+      var txt = obj.text || obj.message || obj.body || obj.content;
+      if (typeof txt === 'string' && txt.length) return { kind: 'text', text: txt };
+
+    } catch (e) {
+      // treat as plain text
+    }
+  }
+  return { kind: 'text', text: raw };
+}
+
+function isDuplicateV120(key) {
+  var cache = CacheService.getScriptCache();
+  if (cache.get(key)) return true;
+  cache.put(key, '1', 600);
+  return false;
+}
+
+function emergencyResetV114() {
+  CacheService.getScriptCache().removeAll(['last_id']);
+}
+
+Ingress.gs
+
+/********** Ingress.gs â€” FINAL (Search + Manual Add + Menu + Dedup + Error-only log) **********
+ * âœ… ظٹط³ط¬ظ‘ظ„ ظپظ‚ط·: FORBIDDEN ط£ظˆ ERROR ظپظٹ ظˆط±ظ‚ط© Ingress_Debug (ظ„ط§ ظٹظ„ظˆظ‘ط« Sheet1)
+ * âœ… ظٹط¯ط¹ظ… MAINTENANCE_MODE=on ظ„ط¥ظٹظ‚ط§ظپ ط§ظ„ظ…ط¹ط§ظ„ط¬ط© ظ…ط¤ظ‚طھظ‹ط§
+ * âœ… Telegram:
+ *    /menu ط£ظˆ /menu@Bot â†’ ط¥ط±ط³ط§ظ„ ظ„ظˆط­ط© ط§ظ„طھط­ظƒظ… (Reply Keyboard) ظ…ظ† Telegram.gs
+ *    /menu_off â†’ ط¥ط®ظپط§ط، ط§ظ„ظ„ظˆط­ط©
+ *    ط¨ط­ط«: ظƒظ„ظ…ط©  ط£ظˆ /search ظƒظ„ظ…ط©  â†’ ط¨ط­ط« ظپظٹ ط¢ط®ط± 200 ط¹ظ…ظ„ظٹط©
+ *    ط£ط¶ظپ: ظ…ط¨ظ„ط؛ | ط¬ظ‡ط© | طھطµظ†ظٹظپ  ط£ظˆ /add ... â†’ ط¥ط¯ط®ط§ظ„ ظٹط¯ظˆظٹ
+ *    ط£ط²ط±ط§ط± Reply Keyboard (ًں“ٹ طھظ‚ط±ظٹط± / ط¢ط®ط± 5 / ط¢ط®ط± 10 / ط§ظ„ظٹظˆظ… / ط§ظ„ط£ط³ط¨ظˆط¹ / ط§ظ„ط´ظ‡ط±)
+ * âœ… iPhone Shortcuts:
+ *    POST JSON {text:"...", source:"ios_sms"} ط¹ظ„ظ‰ ط±ط§ط¨ط· ظپظٹظ‡ ?secret=INGRESS-2026
+ *    ظˆظٹظڈط±ط¬ط¹ JSON ط¨ط³ظٹط·: {"ok":true,"kind":"iphone"}
+ *********************************************************************************************/
+
+function doGet(e) {
+  var secretParam = e && e.parameter && e.parameter.secret;
+
+  if (ENV.INGRESS_SECRET && secretParam && secretParam !== ENV.INGRESS_SECRET) {
+    logIngressEvent_('FORBIDDEN', 'doGet', { reason: 'secret mismatch' }, JSON.stringify(e || {}));
+    return ContentService.createTextOutput('FORBIDDEN').setMimeType(ContentService.MimeType.TEXT);
+  }
+
+  var sms = (e && e.parameter && e.parameter.sms) ? e.parameter.sms : 'ظپط­طµ doGet';
+  executeUniversalFlowV120(sms, 'ط¢ظٹظپظˆظ† (GET)', null);
+  return ContentService.createTextOutput('âœ… ظ…ط³ط§ط± doGet ط³ظ„ظٹظ…').setMimeType(ContentService.MimeType.TEXT);
+}
+
+function _prop_(k, fallback) {
+  try { return PropertiesService.getScriptProperties().getProperty(k) || (fallback || ''); }
+  catch (e) { return (fallback || ''); }
+}
+
+function _normCmd_(text) {
+  var s = String(text || '').trim();
+  if (!s) return '';
+  s = s.split(/\s+/)[0];
+  s = s.split('@')[0]; // /cmd@bot â†’ /cmd
+  return s;
+}
+
+function logIngressEvent_(level, where, meta, raw) {
+  try {
+    var sh = _sheet('Ingress_Debug');
+    if (sh.getLastRow() === 0) {
+      sh.appendRow(['ط§ظ„ظˆظ‚طھ', 'ط§ظ„ظ…ط³طھظˆظ‰', 'ط§ظ„ظ…ط³ط§ط±', 'ط¨ظٹط§ظ†ط§طھ', 'ظ†طµ ظ…ط®طھطµط±']);
+      sh.setFrozenRows(1);
+      sh.setRightToLeft(true);
+      sh.getRange('A:A').setNumberFormat('yyyy-MM-dd HH:mm:ss');
+    }
+    var metaStr = '';
+    try { metaStr = JSON.stringify(meta || {}); } catch (e) { metaStr = String(meta || ''); }
+
+    sh.appendRow([
+      new Date(),
+      String(level || ''),
+      String(where || ''),
+      metaStr.slice(0, 1200),
+      String(raw || '').slice(0, 900)
+    ]);
+  } catch (e2) {}
+}
+
+function jsonOut_(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj || {}))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+/** ظ…ظ†ط¹ طھظƒط±ط§ط± ط§ظ„ط±ط³ط§ط¦ظ„ (Dedup) ظ„ظ…ط¯ط© 10 ط¯ظ‚ط§ط¦ظ‚ */
+function isDuplicateText_(prefix, text) {
+  var s = String(text || '');
+  var sig = Utilities.base64EncodeWebSafe(
+    Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, s)
+  ).slice(0, 20);
+  var key = prefix + '_' + sig;
+  var cache = CacheService.getScriptCache();
+  if (cache.get(key)) return true;
+  cache.put(key, '1', 600);
+  return false;
+}
+
+function normalizeNumber_(s) {
+  s = String(s || '').trim();
+  var map = {'ظ ':'0','ظ،':'1','ظ¢':'2','ظ£':'3','ظ¤':'4','ظ¥':'5','ظ¦':'6','ظ§':'7','ظ¨':'8','ظ©':'9','ظ«':'.','ظ¬':','};
+  s = s.replace(/[ظ -ظ©ظ«ظ¬]/g, function(ch){ return map[ch] || ch; });
+  s = s.replace(/,/g, '').replace(/\s+/g, '');
+  return s;
+}
+
+/** ًں”ژ ط¨ط­ط« ط¢ط®ط± 200 ط¹ظ…ظ„ظٹط© */
+function V120_searchLast200_(keyword, chatId) {
+  keyword = String(keyword || '').trim().toLowerCase();
+  if (!keyword) { sendTelegram_(chatId, 'ًں”ژ ط§ظƒطھط¨: ط¨ط­ط«: ظƒظ„ظ…ط©'); return; }
+
+  var s1 = _sheet('Sheet1');
+  var last = s1.getLastRow();
+  if (last < 2) { sendTelegram_(chatId, 'ًں”ژ ظ„ط§ طھظˆط¬ط¯ ط¨ظٹط§ظ†ط§طھ ط¨ط¹ط¯.'); return; }
+
+  var n = Math.min(200, last - 1);
+  var start = last - n + 1;
+  var rows = s1.getRange(start, 1, n, 12).getValues();
+
+  var hits = [];
+  for (var i = rows.length - 1; i >= 0; i--) {
+    var r = rows[i];
+    var dt = (r[0] instanceof Date) ? Utilities.formatDate(r[0], Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm') : '';
+    var amt = Number(r[7]) || 0;
+    var merch = String(r[8] || '').toLowerCase();
+    var cat = String(r[9] || '').toLowerCase();
+    var raw = String(r[11] || '').toLowerCase();
+
+    if (merch.indexOf(keyword) !== -1 || cat.indexOf(keyword) !== -1 || raw.indexOf(keyword) !== -1) {
+      hits.push('â€¢ ' + dt + ' | ' + amt.toFixed(2) + ' | ' + (r[8] || '') + ' | ' + (r[9] || ''));
+      if (hits.length >= 10) break;
+    }
+  }
+
+  if (!hits.length) { sendTelegram_(chatId, 'ًں”ژ ظ„ط§ طھظˆط¬ط¯ ظ†طھط§ط¦ط¬ ظ„ظ€: ' + keyword); return; }
+  sendTelegram_(chatId, 'ًں”ژ ظ†طھط§ط¦ط¬ ط§ظ„ط¨ط­ط« (ط¢ط®ط± ' + n + '):\n' + hits.join('\n'));
+}
+
+/** â‍• ط¥ط¯ط®ط§ظ„ ظٹط¯ظˆظٹ: ط£ط¶ظپ: ظ…ط¨ظ„ط؛ | ط¬ظ‡ط© | طھطµظ†ظٹظپ */
+function V120_addManual_(payload, chatId) {
+  var s = String(payload || '').trim();
+  if (!s) { sendTelegram_(chatId, 'â‍• ظ…ط«ط§ظ„: ط£ط¶ظپ: 45.75 | ظ…ط·ط¹ظ… | ظ…ط·ط§ط¹ظ…'); return; }
+
+  var parts = s.split('|').map(function(x){return x.trim();}).filter(Boolean);
+  if (parts.length < 3) parts = s.split(/[طŒ,]/).map(function(x){return x.trim();}).filter(Boolean);
+  if (parts.length < 3) { sendTelegram_(chatId, 'â‌— طµظٹط؛ط© ط؛ظٹط± طµط­ظٹط­ط©.\nظ…ط«ط§ظ„: ط£ط¶ظپ: 45.75 | ظ…ط·ط¹ظ… | ظ…ط·ط§ط¹ظ…'); return; }
+
+  var amt = Number(normalizeNumber_(parts[0]));
+  if (!isFinite(amt) || amt === 0) { sendTelegram_(chatId, 'â‌— ط§ظ„ظ…ط¨ظ„ط؛ ط؛ظٹط± طµط§ظ„ط­.'); return; }
+
+  var merchant = parts[1];
+  var category = parts.slice(2).join(' | ');
+
+  // ط³ط§ظ„ط¨ = ظˆط§ط±ط¯طŒ ظ…ظˆط¬ط¨ = طµط§ط¯ط±
+  var isIncoming = (amt < 0);
+  var amountAbs = Math.abs(amt);
+
+  var ai = {
+    merchant: merchant,
+    amount: amountAbs,
+    currency: 'SAR',
+    category: category,
+    type: isIncoming ? 'ط­ظˆط§ظ„ط©' : 'ظ…ط´طھط±ظٹط§طھ',
+    isIncoming: isIncoming,
+    accNum: '',
+    cardNum: ''
+  };
+
+  try {
+    var sync = syncQuadV120(ai, 'ط¥ط¯ط®ط§ظ„ ظٹط¯ظˆظٹ: ' + s, 'ط¥ط¯ط®ط§ظ„_ظٹط¯ظˆظٹ');
+    sendSovereignReportV120(ai, sync, 'ط¥ط¯ط®ط§ظ„_ظٹط¯ظˆظٹ', 'ط¥ط¯ط®ط§ظ„ ظٹط¯ظˆظٹ: ' + s, chatId);
+    sendTelegram_(chatId, 'âœ… طھظ… طھط³ط¬ظٹظ„ ط§ظ„ط¥ط¯ط®ط§ظ„ ط§ظ„ظٹط¯ظˆظٹ.');
+  } catch (e) {
+    logIngressEvent_('ERROR', 'manual_add', { error: String(e) }, s);
+    sendTelegram_(chatId, 'âڑ ï¸ڈ طھط¹ط°ط± طھط³ط¬ظٹظ„ ط§ظ„ط¥ط¯ط®ط§ظ„ ط§ظ„ظٹط¯ظˆظٹ. ط±ط§ط¬ط¹ Ingress_Debug.');
+  }
+}
+
+function doPost(e) {
+  // âœ… طµظٹط§ظ†ط©
+  if ((_prop_('MAINTENANCE_MODE', '') || '').toLowerCase() === 'on') {
+    return jsonOut_({ ok: true, maintenance: true });
+  }
+
+  var raw = (e && e.postData && e.postData.contents) ? e.postData.contents : '';
+  var parsed = _parseIncoming_(raw);
+
+  try {
+    var urlSecret = (e && e.parameter && e.parameter.secret) ? String(e.parameter.secret) : '';
+    var headerIngress = (e && e.headers && (e.headers['X-INGRESS-SECRET'] || e.headers['x-ingress-secret'])) || '';
+
+    // ===== Telegram =====
+    if (parsed.kind === 'telegram') {
+      // ظ†ط¹طھظ…ط¯ ط¹ظ„ظ‰ ?secret=... ظپظٹ ط±ط§ط¨ط· ط§ظ„ظˆظٹط¨ظ‡ظˆظƒ
+      var okByUrl = !!(ENV.INGRESS_SECRET && urlSecret && (urlSecret === String(ENV.INGRESS_SECRET)));
+      if (!okByUrl) {
+        logIngressEvent_('FORBIDDEN', 'telegram_auth', { urlSecret_present: !!urlSecret }, raw);
+        return ContentService.createTextOutput('FORBIDDEN').setMimeType(ContentService.MimeType.TEXT);
+      }
+
+      var update = parsed.update;
+      if (update.update_id && isDuplicateV120('tg_' + update.update_id)) return jsonOut_({ ok: true, kind: 'telegram', dup: true });
+
+      // Inline callback: ط¥ظ† ظƒظ†طھ طھط³طھط®ط¯ظ…ظ‡ط§ ظپظٹ Telegram.gs (ظ‚ط¯ظٹظ…ط©)
+      if (update.callback_query) {
+        handleInteractionV120(update.callback_query);
+        return jsonOut_({ ok: true, kind: 'telegram', cb: true });
+      }
+
+      var msg = update.message || update.channel_post || {};
+      var text = msg.text || msg.caption || '';
+      var chatId = (msg.chat && msg.chat.id) ? String(msg.chat.id) : '';
+
+      // Dedup ط±ط³ط§ط¦ظ„ ظٹط¯ظˆظٹط© ط³ط±ظٹط¹ط©
+      if (isDuplicateText_('tg_text', text)) return jsonOut_({ ok: true, kind: 'telegram', dupText: true });
+
+      var cmd = _normCmd_(text);
+
+      // /menu ظˆ /menu_off (طھط¹طھظ…ط¯ ط¹ظ„ظ‰ ظˆط¬ظˆط¯ ط§ظ„ط¯ظˆط§ظ„ ظپظٹ Telegram.gs)
+      if (cmd === '/menu' || cmd === '/start') {
+        if (typeof V120_sendMenuPanel_ === 'function') V120_sendMenuPanel_(chatId);
+        else sendTelegram_(chatId, 'ظ„ظˆط­ط© ط§ظ„طھط­ظƒظ… ط؛ظٹط± ظ…طھط§ط­ط©. طھط£ظƒط¯ ظ…ظ† Telegram.gs');
+        return jsonOut_({ ok: true, kind: 'telegram', menu: true });
+      }
+      if (cmd === '/menu_off') {
+        if (typeof V120_removeMenuPanel_ === 'function') V120_removeMenuPanel_(chatId);
+        return jsonOut_({ ok: true, kind: 'telegram', menuOff: true });
+      }
+
+      // ط£ظˆط§ظ…ط± ط§ظ„ظ„ظˆط­ط© (Reply Keyboard): ظ†طµظˆطµ ط¬ط§ظ‡ط²ط©
+      if (text === 'ًں“ٹ طھظ‚ط±ظٹط±' || text === 'طھظ‚ط±ظٹط±') { sendBudgetsSnapshotToTelegram_(); return jsonOut_({ ok: true, kind: 'telegram', report: true }); }
+      if (text === 'ًں§¾ ط¢ط®ط± 5') { sendLastNToTelegram_(chatId, 5); return jsonOut_({ ok: true, kind: 'telegram', last5: true }); }
+      if (text === 'ًں§¾ ط¢ط®ط± 10') { sendLastNToTelegram_(chatId, 10); return jsonOut_({ ok: true, kind: 'telegram', last10: true }); }
+      if (text === 'ًں“… ط§ظ„ظٹظˆظ…') { sendPeriodSummary_(chatId, 'today'); return jsonOut_({ ok: true, kind: 'telegram', today: true }); }
+      if (text === 'ًں—“ï¸ڈ ط§ظ„ط£ط³ط¨ظˆط¹') { sendPeriodSummary_(chatId, 'week'); return jsonOut_({ ok: true, kind: 'telegram', week: true }); }
+      if (text === 'ًں—“ï¸ڈ ط§ظ„ط´ظ‡ط±') { sendPeriodSummary_(chatId, 'month'); return jsonOut_({ ok: true, kind: 'telegram', month: true }); }
+
+      // ًں”ژ ط¨ط­ط«
+      if (text === 'ًں”ژ ط¨ط­ط«') { sendTelegram_(chatId, 'ط§ظƒطھط¨: ط¨ط­ط«: ظƒظ„ظ…ط©'); return jsonOut_({ ok: true, kind: 'telegram', searchPrompt: true }); }
+      if (text.trim().indexOf('ط¨ط­ط«:') === 0) { V120_searchLast200_(text.replace(/^ط¨ط­ط«:/,'').trim(), chatId); return jsonOut_({ ok: true, kind: 'telegram', search: true }); }
+      if (cmd === '/search') { V120_searchLast200_(text.replace(/^\/search/i,'').trim(), chatId); return jsonOut_({ ok: true, kind: 'telegram', search: true }); }
+
+      // â‍• ط¥ط¯ط®ط§ظ„ ظٹط¯ظˆظٹ
+      if (text === 'â‍• ط¥ط¯ط®ط§ظ„ ظٹط¯ظˆظٹ') { sendTelegram_(chatId, 'ط§ظƒطھط¨: ط£ط¶ظپ: 45.75 | ط¬ظ‡ط© | طھطµظ†ظٹظپ'); return jsonOut_({ ok: true, kind: 'telegram', addPrompt: true }); }
+      if (text.trim().indexOf('ط£ط¶ظپ:') === 0) { V120_addManual_(text.replace(/^ط£ط¶ظپ:/,'').trim(), chatId); return jsonOut_({ ok: true, kind: 'telegram', add: true }); }
+      if (cmd === '/add') { V120_addManual_(text.replace(/^\/add/i,'').trim(), chatId); return jsonOut_({ ok: true, kind: 'telegram', add: true }); }
+
+      // ط®ظ„ط§ظپ ط°ظ„ظƒ: ظ…ط³ط§ط± ط§ظ„طھط­ظ„ظٹظ„ ط§ظ„ط¹ط§ط¯ظٹ
+      if (text) executeUniversalFlowV120(text, update.channel_post ? 'ظ‚ظ†ط§ط© ط§ظ„ط±طµط¯' : 'طھظ„ظٹط¬ط±ط§ظ… (ظٹط¯ظˆظٹ)', chatId);
+      return jsonOut_({ ok: true, kind: 'telegram', flow: true });
+    }
+
+    // ===== iPhone / non-Telegram =====
+    if (ENV.INGRESS_SECRET && (urlSecret !== ENV.INGRESS_SECRET && headerIngress !== ENV.INGRESS_SECRET)) {
+      logIngressEvent_('FORBIDDEN', 'iphone_auth', { urlSecret_present: !!urlSecret, headerIngress_present: !!headerIngress }, raw);
+      return ContentService.createTextOutput('FORBIDDEN').setMimeType(ContentService.MimeType.TEXT);
+    }
+
+    // Dedup
+    if (parsed.kind === 'text' && parsed.text && isDuplicateText_('iphone', parsed.text)) {
+      return jsonOut_({ ok: true, kind: 'iphone', dup: true });
+    }
+
+    if (parsed.kind === 'text' && parsed.text) {
+      executeUniversalFlowV120(parsed.text, 'ط¢ظٹظپظˆظ† (POST)', null);
+      return jsonOut_({ ok: true, kind: 'iphone' });
+    }
+
+    return jsonOut_({ ok: true, kind: 'none' });
+
+  } catch (err) {
+    logIngressEvent_('ERROR', 'doPost', { error: String(err) }, raw);
+    return jsonOut_({ ok: false, error: String(err) });
+  }
+}
+
+
+/********** Flow.gs â€” Sync + Interlink Sheets (Budgets + Debt + Dashboard) **********/
+
+function executeUniversalFlowV120(smsText, source, destChatId) {
+  var ss = _ss();
+  try {
+    var ai = callAiHybridV120(smsText);
+    ai = applyClassifierMap_(smsText, ai);
+
+    var sync = syncQuadV120(ai, smsText, source);
+
+    // ط¥ط±ط³ط§ظ„ ط§ظ„ط±طµط¯ ظ„ظ„ظ…ط¬ظ…ظˆط¹ط© (ط¨ط·ط§ظ‚ط© ظ†ط¸ظٹظپط© ط¨ط¯ظˆظ† ط£ط²ط±ط§ط±)
+    sendSovereignReportV120(ai, sync, source, smsText, destChatId);
+
+  } catch (err) {
+    try {
+      ss.getSheetByName('Sheet1').appendRow([new Date(), 'FLOW_ERROR', '-', '-', source, '-', '-', '-', '-', '-', '-', err.toString()]);
+    } catch (_) {}
+  }
+}
+
+function ensureBudgetRowExists_(category) {
+  category = String(category || '').trim();
+  if (!category) return;
+
+  var sB = _sheet('Budgets');
+  var vals = sB.getDataRange().getValues();
+  for (var i = 1; i < vals.length; i++) {
+    if (String(vals[i][0] || '') === category) return;
+  }
+
+  var row = sB.getLastRow() + 1;
+  sB.getRange(row, 1, 1, 4).setValues([[category, 0, 0, '=B' + row + '-C' + row]]);
+}
+
+/** طھط­ط¯ظٹط¯ ظ‡ظ„ ط§ظ„ط¹ظ…ظ„ظٹط© ط­ظˆط§ظ„ط© ط¯ط§ط®ظ„ظٹط© */
+function isInternalTransfer_(data) {
+  var cat = String(data && data.category ? data.category : '');
+  var typ = String(data && data.type ? data.type : '');
+  // طھظˆط³ط¹ط© ط§ظ„ط´ط±ظˆط· ط­ط³ط¨ ظ‚ط§ظ…ظˆط³ظƒ
+  return (cat.indexOf('ط­ظˆط§ظ„ط© ط¯ط§ط®ظ„ظٹط©') !== -1) || (typ.indexOf('ط¯ط§ط®ظ„ظٹط©') !== -1);
+}
+
+/**
+ * ظ…ط²ط§ظ…ظ†ط© ط±ط¨ط§ط¹ظٹط©:
+ * - Sheet1 (ط³ط¬ظ„)
+ * - Budgets (ظ…طµط±ظˆظپ)
+ * - Debt_Ledger + Debt_Index (ط­ظˆط§ظ„ط§طھ/ط­ظˆظ‘ط§ظ„ط© ط¯ط§ط®ظ„ظٹط© ط­ط³ط¨ ط§ظ„ظ‚ط§ط¹ط¯ط©)
+ * - Dashboard (ط®ط§ظ…)
+ */
+function syncQuadV120(data, raw, source) {
+  var now = new Date();
+  var s1 = _sheet('Sheet1');
+  var sB = _sheet('Budgets');
+  var sD = _sheet('Debt_Ledger');
+  var sDash = _sheet('Dashboard');
+
+  // 1) Sheet1
+  s1.appendRow([
+    now, 'V120_AUTO', 'ط§ظ„ظٹظˆظ…', 'ط§ظ„ط£ط³ط¨ظˆط¹', source,
+    data.accNum || '',
+    data.cardNum || '',
+    Number(data.amount) || 0,
+    data.merchant || '',
+    data.category || '',
+    data.type || '',
+    raw
+  ]);
+
+  // 2) Budgets â€” ط£ط¶ظپ ط§ظ„طھطµظ†ظٹظپ طھظ„ظ‚ط§ط¦ظٹظ‹ط§ ط«ظ… ط­ط¯ط« ط§ظ„ظ…طµط±ظˆظپ
+  var bRem = 0;
+  try {
+    ensureBudgetRowExists_(data.category);
+
+    var bData = sB.getDataRange().getValues();
+    for (var i = 1; i < bData.length; i++) {
+      if (String(bData[i][0] || '') === String(data.category || '')) {
+        var current = Number(bData[i][2]) || 0;
+
+        // ظ‚ط§ط¹ط¯ط© ط§ظ„ظ…طµط±ظˆظپ: ظˆط§ط±ط¯ ظٹظ‚ظ„ظ„ ط§ظ„ظ…طµط±ظˆظپ (ط³ط§ظ„ط¨) ظˆطµط§ط¯ط± ظٹط²ظٹط¯ظ‡ (ظ…ظˆط¬ط¨)
+        var delta = data.isIncoming ? -(Number(data.amount) || 0) : (Number(data.amount) || 0);
+
+        sB.getRange(i + 1, 3).setValue(current + delta);
+        SpreadsheetApp.flush();
+        bRem = Number(sB.getRange(i + 1, 4).getValue()) || 0;
+        break;
+      }
+    }
+  } catch (_) {}
+
+  // 3) Debt_Ledger â€” طھط·ط¨ظٹظ‚ ظ‚ط§ط¹ط¯ط© ط§ظ„ط­ظˆط§ظ„ط© ط§ظ„ط¯ط§ط®ظ„ظٹط© (طµط§ط¯ط±ط© = ط¯ط§ط¦ظ†طŒ ظˆط§ط±ط¯ط© = ظ…ط¯ظٹظ†)
+  var dBal = 0;
+  try {
+    var internal = isInternalTransfer_(data);
+
+    if (internal) {
+      var amt = Number(data.amount) || 0;
+      var party = data.merchant || 'طھط­ظˆظٹظ„ ط¯ط§ط®ظ„ظٹ';
+
+      // âœ… ط­ط³ط¨ ط·ظ„ط¨ظƒ:
+      // ظˆط§ط±ط¯ط© => ظ…ط¯ظٹظ† (C)
+      // طµط§ط¯ط±ط© => ط¯ط§ط¦ظ† (D)
+      var debtor = data.isIncoming ? amt : 0;
+      var creditor = data.isIncoming ? 0 : amt;
+
+      var desc = (data.isIncoming ? 'ط­ظˆط§ظ„ط© ط¯ط§ط®ظ„ظٹط© ظˆط§ط±ط¯ط©' : 'ط­ظˆط§ظ„ط© ط¯ط§ط®ظ„ظٹط© طµط§ط¯ط±ط©') + ' - ' + party;
+
+      sD.appendRow([now, party, debtor, creditor, '', desc]);
+      SpreadsheetApp.flush();
+      try { dBal = Number(sD.getRange(sD.getLastRow(), 5).getValue()) || 0; } catch (e1) {}
+
+      // ظ„ط§ ظ†ط­ط¯ظ‘ط« Debt_Index ظ„ظ„ط­ظˆط§ظ„ط§طھ ط§ظ„ط¯ط§ط®ظ„ظٹط© (ظ„ظٹط³طھ ط¯ظٹظ†ظ‹ط§ ط¹ظ„ظ‰ ط·ط±ظپ ط¹ط§ط¯ط©)
+      // ط¥ط°ط§ ط±ط؛ط¨طھ ظ†ط¶ظٹظپ ط®ظٹط§ط± ظ„طھط­ط¯ظٹط«ظ‡ ظ„ط§ط­ظ‚ظ‹ط§.
+    } else {
+      // ظ„ظ„ط­ظˆط§ظ„ط§طھ ط§ظ„ط®ط§ط±ط¬ظٹط©/ط§ظ„ط¯ظٹظˆظ†: ظٹظ…ظƒظ†ظƒ ط¥ط¨ظ‚ط§ط، ظ…ظ†ط·ظ‚ظƒ ط§ظ„ظ‚ط¯ظٹظ… ط¥ظ† ط±ط؛ط¨طھ
+      // (ظ‡ظ†ط§ ظ„ط§ ظ†ط¶ظٹظپ ط´ظٹط، ط­طھظ‰ ظ„ط§ ظ†ط؛ظٹظ‘ط± ط³ظ„ظˆظƒظƒ ط§ظ„ط³ط§ط¨ظ‚ ط¯ظˆظ† ط·ظ„ط¨)
+    }
+  } catch (_) {}
+
+  // 4) Dashboard raw (ط§ط®طھظٹط§ط±ظٹ)
+  try {
+    sDash.appendRow([now, data.merchant || '', Number(data.amount) || 0, data.category || '', source]);
+  } catch (_) {}
+
+  return { debt: dBal, budget: bRem };
+}
+Flow.gs
+
+/********** Flow.gs â€” Sync + Interlink Sheets (Budgets + Debt + Dashboard) **********/
+
+function executeUniversalFlowV120(smsText, source, destChatId) {
+  var ss = _ss();
+  try {
+    var ai = callAiHybridV120(smsText);
+    ai = applyClassifierMap_(smsText, ai);
+
+    var sync = syncQuadV120(ai, smsText, source);
+
+    // ط¥ط±ط³ط§ظ„ ط§ظ„ط±طµط¯ ظ„ظ„ظ…ط¬ظ…ظˆط¹ط© (ط¨ط·ط§ظ‚ط© ظ†ط¸ظٹظپط© ط¨ط¯ظˆظ† ط£ط²ط±ط§ط±)
+    sendSovereignReportV120(ai, sync, source, smsText, destChatId);
+
+  } catch (err) {
+    try {
+      ss.getSheetByName('Sheet1').appendRow([new Date(), 'FLOW_ERROR', '-', '-', source, '-', '-', '-', '-', '-', '-', err.toString()]);
+    } catch (_) {}
+  }
+}
+
+function ensureBudgetRowExists_(category) {
+  category = String(category || '').trim();
+  if (!category) return;
+
+  var sB = _sheet('Budgets');
+  var vals = sB.getDataRange().getValues();
+  for (var i = 1; i < vals.length; i++) {
+    if (String(vals[i][0] || '') === category) return;
+  }
+
+  var row = sB.getLastRow() + 1;
+  sB.getRange(row, 1, 1, 4).setValues([[category, 0, 0, '=B' + row + '-C' + row]]);
+}
+
+/** طھط­ط¯ظٹط¯ ظ‡ظ„ ط§ظ„ط¹ظ…ظ„ظٹط© ط­ظˆط§ظ„ط© ط¯ط§ط®ظ„ظٹط© */
+function isInternalTransfer_(data) {
+  var cat = String(data && data.category ? data.category : '');
+  var typ = String(data && data.type ? data.type : '');
+  // طھظˆط³ط¹ط© ط§ظ„ط´ط±ظˆط· ط­ط³ط¨ ظ‚ط§ظ…ظˆط³ظƒ
+  return (cat.indexOf('ط­ظˆط§ظ„ط© ط¯ط§ط®ظ„ظٹط©') !== -1) || (typ.indexOf('ط¯ط§ط®ظ„ظٹط©') !== -1);
+}
+
+/**
+ * ظ…ط²ط§ظ…ظ†ط© ط±ط¨ط§ط¹ظٹط©:
+ * - Sheet1 (ط³ط¬ظ„)
+ * - Budgets (ظ…طµط±ظˆظپ)
+ * - Debt_Ledger + Debt_Index (ط­ظˆط§ظ„ط§طھ/ط­ظˆظ‘ط§ظ„ط© ط¯ط§ط®ظ„ظٹط© ط­ط³ط¨ ط§ظ„ظ‚ط§ط¹ط¯ط©)
+ * - Dashboard (ط®ط§ظ…)
+ */
+function syncQuadV120(data, raw, source) {
+  var now = new Date();
+  var s1 = _sheet('Sheet1');
+  var sB = _sheet('Budgets');
+  var sD = _sheet('Debt_Ledger');
+  var sDash = _sheet('Dashboard');
+
+  // 1) Sheet1
+  s1.appendRow([
+    now, 'V120_AUTO', 'ط§ظ„ظٹظˆظ…', 'ط§ظ„ط£ط³ط¨ظˆط¹', source,
+    data.accNum || '',
+    data.cardNum || '',
+    Number(data.amount) || 0,
+    data.merchant || '',
+    data.category || '',
+    data.type || '',
+    raw
+  ]);
+
+  // 2) Budgets â€” ط£ط¶ظپ ط§ظ„طھطµظ†ظٹظپ طھظ„ظ‚ط§ط¦ظٹظ‹ط§ ط«ظ… ط­ط¯ط« ط§ظ„ظ…طµط±ظˆظپ
+  var bRem = 0;
+  try {
+    ensureBudgetRowExists_(data.category);
+
+    var bData = sB.getDataRange().getValues();
+    for (var i = 1; i < bData.length; i++) {
+      if (String(bData[i][0] || '') === String(data.category || '')) {
+        var current = Number(bData[i][2]) || 0;
+
+        // ظ‚ط§ط¹ط¯ط© ط§ظ„ظ…طµط±ظˆظپ: ظˆط§ط±ط¯ ظٹظ‚ظ„ظ„ ط§ظ„ظ…طµط±ظˆظپ (ط³ط§ظ„ط¨) ظˆطµط§ط¯ط± ظٹط²ظٹط¯ظ‡ (ظ…ظˆط¬ط¨)
+        var delta = data.isIncoming ? -(Number(data.amount) || 0) : (Number(data.amount) || 0);
+
+        sB.getRange(i + 1, 3).setValue(current + delta);
+        SpreadsheetApp.flush();
+        bRem = Number(sB.getRange(i + 1, 4).getValue()) || 0;
+        break;
+      }
+    }
+  } catch (_) {}
+
+  // 3) Debt_Ledger â€” طھط·ط¨ظٹظ‚ ظ‚ط§ط¹ط¯ط© ط§ظ„ط­ظˆط§ظ„ط© ط§ظ„ط¯ط§ط®ظ„ظٹط© (طµط§ط¯ط±ط© = ط¯ط§ط¦ظ†طŒ ظˆط§ط±ط¯ط© = ظ…ط¯ظٹظ†)
+  var dBal = 0;
+  try {
+    var internal = isInternalTransfer_(data);
+
+    if (internal) {
+      var amt = Number(data.amount) || 0;
+      var party = data.merchant || 'طھط­ظˆظٹظ„ ط¯ط§ط®ظ„ظٹ';
+
+      // âœ… ط­ط³ط¨ ط·ظ„ط¨ظƒ:
+      // ظˆط§ط±ط¯ط© => ظ…ط¯ظٹظ† (C)
+      // طµط§ط¯ط±ط© => ط¯ط§ط¦ظ† (D)
+      var debtor = data.isIncoming ? amt : 0;
+      var creditor = data.isIncoming ? 0 : amt;
+
+      var desc = (data.isIncoming ? 'ط­ظˆط§ظ„ط© ط¯ط§ط®ظ„ظٹط© ظˆط§ط±ط¯ط©' : 'ط­ظˆط§ظ„ط© ط¯ط§ط®ظ„ظٹط© طµط§ط¯ط±ط©') + ' - ' + party;
+
+      sD.appendRow([now, party, debtor, creditor, '', desc]);
+      SpreadsheetApp.flush();
+      try { dBal = Number(sD.getRange(sD.getLastRow(), 5).getValue()) || 0; } catch (e1) {}
+
+      // ظ„ط§ ظ†ط­ط¯ظ‘ط« Debt_Index ظ„ظ„ط­ظˆط§ظ„ط§طھ ط§ظ„ط¯ط§ط®ظ„ظٹط© (ظ„ظٹط³طھ ط¯ظٹظ†ظ‹ط§ ط¹ظ„ظ‰ ط·ط±ظپ ط¹ط§ط¯ط©)
+      // ط¥ط°ط§ ط±ط؛ط¨طھ ظ†ط¶ظٹظپ ط®ظٹط§ط± ظ„طھط­ط¯ظٹط«ظ‡ ظ„ط§ط­ظ‚ظ‹ط§.
+    } else {
+      // ظ„ظ„ط­ظˆط§ظ„ط§طھ ط§ظ„ط®ط§ط±ط¬ظٹط©/ط§ظ„ط¯ظٹظˆظ†: ظٹظ…ظƒظ†ظƒ ط¥ط¨ظ‚ط§ط، ظ…ظ†ط·ظ‚ظƒ ط§ظ„ظ‚ط¯ظٹظ… ط¥ظ† ط±ط؛ط¨طھ
+      // (ظ‡ظ†ط§ ظ„ط§ ظ†ط¶ظٹظپ ط´ظٹط، ط­طھظ‰ ظ„ط§ ظ†ط؛ظٹظ‘ط± ط³ظ„ظˆظƒظƒ ط§ظ„ط³ط§ط¨ظ‚ ط¯ظˆظ† ط·ظ„ط¨)
+    }
+  } catch (_) {}
+
+  // 4) Dashboard raw (ط§ط®طھظٹط§ط±ظٹ)
+  try {
+    sDash.appendRow([now, data.merchant || '', Number(data.amount) || 0, data.category || '', source]);
+  } catch (_) {}
+
+  return { debt: dBal, budget: bRem };
+}
+
+AI.gs
+
+/********** Sovereign V120 â€” R3.3 | AI.gs **********/
+
+function callAiHybridV120(text) {
+  var seed = preParseFallback(text);
+
+  if (ENV.GROQ_KEY) {
+    try {
+      var url1 = 'https://api.groq.com/openai/v1/chat/completions';
+      var options1 = {
+        method: 'post',
+        headers: { Authorization: 'Bearer ' + ENV.GROQ_KEY, 'Content-Type': 'application/json' },
+        payload: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: [
+            { role: 'system', content: 'Extract Arabic banking transaction fields. Return strict JSON ONLY.' },
+            { role: 'user', content: 'ط§ظ„ظ†طµ: """' + text + '""" ط§ظ„ظ…ط·ظ„ظˆط¨ JSON: {"merchant":"string","amount":"number","currency":"SAR","category":"string","type":"string","isIncoming":"boolean","accNum":"string","cardNum":"string"}' }
+          ],
+          response_format: { type: 'json_object' },
+          temperature: 0
+        })
+      };
+      var resp1 = UrlFetchApp.fetch(url1, options1);
+      var content = JSON.parse(resp1.getContentText()).choices[0].message.content;
+      var parsed = JSON.parse(content);
+      return sanitizeAI(parsed, seed);
+    } catch (e1) { /* ignore */ }
+  }
+
+  if (ENV.GEMINI_KEY) {
+    try {
+      var url2 = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=' + encodeURIComponent(ENV.GEMINI_KEY);
+      var prompt = 'ط­ظ„ظ„ ط§ظ„ظ†طµ ط§ظ„ظ…طµط±ظپظٹ ط§ظ„طھط§ظ„ظٹ ظˆط§ط³طھط®ط±ط¬ JSON ط¨ظ‡ط°ظ‡ ط§ظ„ط­ظ‚ظˆظ„ ظپظ‚ط·: {"merchant":"string","amount":"number","currency":"SAR","category":"string","type":"string","isIncoming":"boolean","accNum":"string","cardNum":"string"}.\n' +
+        'ط§ظ„ظ†طµ: """' + text + '"""';
+
+      var payload2 = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0 } };
+      var resp2 = UrlFetchApp.fetch(url2, { method: 'post', contentType: 'application/json', payload: JSON.stringify(payload2) });
+
+      var data = JSON.parse(resp2.getContentText());
+      var rawText = (data.candidates && data.candidates[0] && data.candidates[0].content &&
+        data.candidates[0].content.parts && data.candidates[0].content.parts[0].text) || '{}';
+
+      var m = rawText.match(/\{[\s\S]*\}/);
+      var parsed2 = m ? JSON.parse(m[0]) : {};
+      return sanitizeAI(parsed2, seed);
+    } catch (e2) { /* ignore */ }
+  }
+
+  return seed;
+}
+
+function preParseFallback(text) {
+  var t = String(text || '').replace(/\s+/g, ' ');
+
+  var amtMatch = t.match(/(\d[\d,\.]*)\s*(SAR|ط±ظٹط§ظ„(?:\s*ط³ط¹ظˆط¯ظٹ)?)/i);
+  var amt = amtMatch ? Number(String(amtMatch[1]).replace(/[,]/g, '')) : 0;
+
+  var incoming = /(ظˆط§ط±ط¯|ط¥ظٹط¯ط§ط¹|ط§ط³طھظ„ط§ظ…|ط¥ط¶ط§ظپط©)/i.test(t);
+  var outgoing = /(ط®طµظ…|ط´ط±ط§ط،|ط³ط­ط¨|ط±ط³ظˆظ…|POS|طµط§ط¯ط±)/i.test(t);
+
+  var accMatch = t.match(/ط­ط³ط§ط¨(?:\s*ط±ظ‚ظ…)?\s*(\d{3,})/i);
+  var cardMatch = t.match(/(?:ط¨ط·ط§ظ‚ط©|ط¨ط·ط§ظ‚ظ‡|ظƒط§ط±طھ)\s*(\d{3,})/i);
+
+  var merchMatch = t.match(/ظ…ظ†\s+([^\s]+)|ط¥ظ„ظ‰\s+([^\s]+)/i);
+  var merchant = (merchMatch && (merchMatch[1] || merchMatch[2])) ? (merchMatch[1] || merchMatch[2]) : 'ط؛ظٹط± ظ…ط­ط¯ط¯';
+
+  var cat = 'ط£ط®ط±ظ‰', type = 'ط­ظˆط§ظ„ط©';
+  if (/(طھط­ظˆظٹظ„|ط­ظˆط§ظ„ط©)/i.test(t)) type = 'ط­ظˆط§ظ„ط©';
+  else if (/(ط´ط±ط§ط،|POS|ظ…طھط¬ط±|ط³ط¯ط§ط¯)/i.test(t)) { type = 'ظ…ط´طھط±ظٹط§طھ'; cat = 'ظ…ط´طھط±ظٹط§طھ ط¹ط§ظ…ط©'; }
+
+  if (incoming) cat = 'ط­ظˆط§ظ„ط§طھ ظˆط§ط±ط¯ط©';
+  if (outgoing) cat = 'ط­ظˆط§ظ„ط§طھ طµط§ط¯ط±ط©';
+
+  return {
+    merchant: merchant,
+    amount: amt || 0,
+    currency: 'SAR',
+    category: cat,
+    type: type,
+    isIncoming: incoming ? true : (outgoing ? false : (amt >= 0)),
+    accNum: accMatch ? accMatch[1] : '',
+    cardNum: cardMatch ? cardMatch[1] : ''
+  };
+}
+
+function sanitizeAI(ai, seed) {
+  var safe = {};
+  for (var k in seed) safe[k] = seed[k];
+  for (var k2 in (ai || {})) safe[k2] = ai[k2];
+
+  safe.amount = Number(safe.amount) || 0;
+  safe.isIncoming = !!safe.isIncoming;
+
+  safe.merchant = String(safe.merchant || '').slice(0, 100);
+  safe.category = String(safe.category || 'ط£ط®ط±ظ‰').slice(0, 100);
+  safe.type = String(safe.type || 'ط­ظˆط§ظ„ط©').slice(0, 50);
+  safe.accNum = String(safe.accNum || '').slice(0, 32);
+  safe.cardNum = String(safe.cardNum || '').slice(0, 32);
+
+  return safe;
+}
+
+/** AI Diagnostics */
+function callAiProbe_(text) {
+  var seed = preParseFallback(text);
+
+  if (ENV.GROQ_KEY) {
+    try {
+      var url1 = 'https://api.groq.com/openai/v1/chat/completions';
+      var options1 = {
+        method: 'post',
+        headers: { Authorization: 'Bearer ' + ENV.GROQ_KEY, 'Content-Type': 'application/json' },
+        payload: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: [
+            { role: 'system', content: 'Extract Arabic banking transaction fields. Return strict JSON ONLY.' },
+            { role: 'user', content: 'ط§ظ„ظ†طµ: """' + text + '""" ط§ظ„ظ…ط·ظ„ظˆط¨ JSON: {"merchant":"string","amount":"number","currency":"SAR","category":"string","type":"string","isIncoming":"boolean","accNum":"string","cardNum":"string"}' }
+          ],
+          response_format: { type: 'json_object' },
+          temperature: 0
+        })
+      };
+
+      var resp1 = UrlFetchApp.fetch(url1, options1);
+      var content = JSON.parse(resp1.getContentText()).choices[0].message.content;
+      var parsed = JSON.parse(content);
+
+      return { ai: sanitizeAI(parsed, seed), engine: 'groq' };
+    } catch (e1) { /* ignore */ }
+  }
+
+  if (ENV.GEMINI_KEY) {
+    try {
+      var url2 = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=' + encodeURIComponent(ENV.GEMINI_KEY);
+      var prompt = 'ط­ظ„ظ„ ط§ظ„ظ†طµ ط§ظ„ظ…طµط±ظپظٹ ط§ظ„طھط§ظ„ظٹ ظˆط§ط³طھط®ط±ط¬ JSON ط¨ظ‡ط°ظ‡ ط§ظ„ط­ظ‚ظˆظ„ ظپظ‚ط·: {"merchant":"string","amount":"number","currency":"SAR","category":"string","type":"string","isIncoming":"boolean","accNum":"string","cardNum":"string"}.\n' +
+        'ط§ظ„ظ†طµ: """' + text + '"""';
+
+      var payload2 = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0 } };
+      var resp2 = UrlFetchApp.fetch(url2, { method: 'post', contentType: 'application/json', payload: JSON.stringify(payload2) });
+
+      var data = JSON.parse(resp2.getContentText());
+      var rawText = (data.candidates && data.candidates[0] && data.candidates[0].content &&
+        data.candidates[0].content.parts && data.candidates[0].content.parts[0].text) || '{}';
+
+      var m = rawText.match(/\{[\s\S]*\}/);
+      var parsed2 = m ? JSON.parse(m[0]) : {};
+
+      return { ai: sanitizeAI(parsed2, seed), engine: 'gemini' };
+    } catch (e2) { /* ignore */ }
+  }
+
+  return { ai: seed, engine: 'fallback' };
+}
+``
+
+
+/********** Sovereign V120 â€” R3.3 | Classifier.gs **********/
+
+function applyClassifierMap_(rawText, ai) {
+  try {
+    var sMap = _sheet('Classifier_Map');
+    var vals = sMap.getDataRange().getValues();
+    var t = String(rawText || '').toLowerCase();
+
+    for (var i = 1; i < vals.length; i++) {
+      var key = String(vals[i][0] || '').toLowerCase();
+      if (!key) continue;
+
+      if (t.indexOf(key) >= 0 || String(ai.merchant || '').toLowerCase().indexOf(key) >= 0) {
+        if (vals[i][1]) ai.category = vals[i][1];
+        if (vals[i][2]) ai.type = vals[i][2];
+        if (String(vals[i][3] || '') !== '') ai.isIncoming = String(vals[i][3]).toLowerCase() === 'true';
+        if (vals[i][4]) ai.accNum = vals[i][4];
+        if (vals[i][5]) ai.cardNum = vals[i][5];
+        break;
+      }
+    }
+  } catch (e) { /* ignore */ }
+
+  return ai;
+}
+
+function updateClassifierMapFromLast_(newCat) {
+  try {
+    var s1 = _sheet('Sheet1');
+    var last = s1.getLastRow();
+    if (last < 2) return;
+
+    var merchant = String(s1.getRange(last, 9).getValue() || '').toLowerCase();
+    var rawText = String(s1.getRange(last, 12).getValue() || '').toLowerCase();
+    var key = merchant || (rawText.split(/\s+/)[0] || '');
+
+    if (!key) return;
+
+    var sMap = _sheet('Classifier_Map');
+    var vals = sMap.getDataRange().getValues();
+
+    for (var i = 1; i < vals.length; i++) {
+      if (String(vals[i][0] || '').toLowerCase() === key) {
+        sMap.getRange(i + 1, 2).setValue(newCat);
+        return;
+      }
+    }
+
+    sMap.appendRow([key, newCat, '', '', '', '']);
+  } catch (e) { /* ignore */ }
+}
+``
+
+/********** Telegram.gs â€” Clean Group (No buttons per transaction) **********/
+
+function _prop_(k, fallback) {
+  try { return PropertiesService.getScriptProperties().getProperty(k) || (fallback || ''); }
+  catch (e) { return (fallback || ''); }
+}
+
+function getHubChatId_() {
+  var hub = _prop_('CHANNEL_ID', '') || _prop_('ADMIN_CHAT_ID', '') || _prop_('CHAT_ID', '') || (ENV.CHAT_ID || '');
+  return String(hub || '');
+}
+
+function getArchiveChatId_() {
+  return String(_prop_('ARCHIVE_CHANNEL_ID', '') || '');
+}
+
+function escHtml_(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function sendTelegramLogged_(chatId, text, extra) {
+  if (!ENV.TELEGRAM_TOKEN || !chatId) return { ok: false, code: 0, body: 'missing token/chatId' };
+
+  var payload = Object.assign({
+    chat_id: String(chatId),
+    text: String(text || ''),
+    disable_web_page_preview: true
+  }, extra || {});
+
+  var resp = UrlFetchApp.fetch('https://api.telegram.org/bot' + ENV.TELEGRAM_TOKEN + '/sendMessage', {
+    method: 'post',
+    payload: payload,
+    muteHttpExceptions: true
+  });
+
+  var code = resp.getResponseCode();
+  var body = resp.getContentText();
+
+  if (code !== 200) {
+    try { if (typeof logIngressEvent_ === 'function') logIngressEvent_('ERROR', 'sendMessage', { code: code }, body); } catch (_) {}
+  }
+  return { ok: (code === 200), code: code, body: body };
+}
+
+function sendTelegram_(chatId, text) {
+  sendTelegramLogged_(chatId, text);
+}
+
+/** ظ„ظˆط­ط© ط®ظٹط§ط±ط§طھ ط«ط§ط¨طھط© (Reply Keyboard) â€” طھط¸ظ‡ط± ط¹ظ†ط¯ /menu ظپظ‚ط· */
+function V120_sendMenuPanel_(chatId) {
+  var hub = String(chatId || getHubChatId_());
+  if (!hub) return;
+
+  var keyboard = {
+    keyboard: [
+      ['ًں“ٹ طھظ‚ط±ظٹط±', 'ًں“… ط§ظ„ظٹظˆظ…', 'ًں—“ï¸ڈ ط§ظ„ط£ط³ط¨ظˆط¹', 'ًں—“ï¸ڈ ط§ظ„ط´ظ‡ط±'],
+      ['ًں§¾ ط¢ط®ط± 5', 'ًں§¾ ط¢ط®ط± 10', 'ًں”ژ ط¨ط­ط«', 'â‍• ط¥ط¯ط®ط§ظ„ ظٹط¯ظˆظٹ']
+    ],
+    resize_keyboard: true,
+    is_persistent: true
+  };
+
+  var msg =
+    'ًں§­ <b>ظ„ظˆط­ط© ط§ظ„طھط­ظƒظ… â€” Sovereign V120</b>\n' +
+    'â€¢ ط¨ط­ط«: <code>ط¨ط­ط«: ظƒظ„ظ…ط©</code>\n' +
+    'â€¢ ط¥ط¯ط®ط§ظ„ ظٹط¯ظˆظٹ: <code>ط£ط¶ظپ: 45.75 | ط¬ظ‡ط© | طھطµظ†ظٹظپ</code>\n' +
+    'â€¢ ط¥ط®ظپط§ط، ط§ظ„ظ„ظˆط­ط©: <code>/menu_off</code>';
+
+  sendTelegramLogged_(hub, msg, { parse_mode: 'HTML', reply_markup: JSON.stringify(keyboard) });
+}
+
+function V120_removeMenuPanel_(chatId) {
+  var hub = String(chatId || getHubChatId_());
+  if (!hub) return;
+  sendTelegramLogged_(hub, 'âœ… طھظ… ط¥ط®ظپط§ط، ظ„ظˆط­ط© ط§ظ„طھط­ظƒظ….', { reply_markup: JSON.stringify({ remove_keyboard: true }) });
+}
+
+/** ظ…ظ„ط®طµ Budgets */
+function sendBudgetsSnapshotToTelegram_() {
+  var hub = getHubChatId_();
+  if (!hub) return;
+
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get('BUDGET_SNAP');
+  if (cached) { sendTelegram_(hub, cached); return; }
+
+  var sB = _sheet('Budgets').getDataRange().getValues();
+  var totalB = 0, totalC = 0, lines = [];
+  for (var i = 1; i < sB.length; i++) {
+    var cat = sB[i][0] || '';
+    var b = Number(sB[i][1]) || 0;
+    var c = Number(sB[i][2]) || 0;
+    totalB += b; totalC += c;
+    lines.push('â€¢ ' + cat + ': ظ…طھط¨ظ‚ظ‘ظٹ ' + (b - c).toFixed(2));
+  }
+
+  var msg = 'ًں“ٹ طھظ‚ط±ظٹط± ط§ظ„ظ…ظˆط§ط²ظ†ط©\n' +
+    'ط§ظ„ظ…ظˆط§ط²ظ†ط©: ' + totalB.toFixed(2) + ' SAR\n' +
+    'ط§ظ„ظ…طµط±ظˆظپ: ' + totalC.toFixed(2) + ' SAR\n' +
+    'â”پâ”پâ”پâ”پâ”پâ”پâ”پâ”پâ”پâ”پâ”پâ”پ\n' + lines.join('\n');
+
+  cache.put('BUDGET_SNAP', msg, 15);
+  sendTelegram_(hub, msg);
+}
+
+/** ط¢ط®ط± N */
+function sendLastNToTelegram_(chatId, n) {
+  n = n || 5;
+  var s1 = _sheet('Sheet1');
+  var last = s1.getLastRow();
+  if (last < 2) { sendTelegram_(chatId, 'ظ„ط§ طھظˆط¬ط¯ ط¹ظ…ظ„ظٹط§طھ ط¨ط¹ط¯.'); return; }
+
+  var start = Math.max(2, last - n + 1);
+  var rows = s1.getRange(start, 1, last - start + 1, 12).getValues();
+
+  var out = ['ًں§¾ ط¢ط®ط± ' + n + ' ط¹ظ…ظ„ظٹط§طھ:'];
+  for (var i = rows.length - 1; i >= 0; i--) {
+    var r = rows[i];
+    var dt = (r[0] instanceof Date) ? Utilities.formatDate(r[0], Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm') : '';
+    out.push('â€¢ ' + dt + ' | ' + (Number(r[7]) || 0).toFixed(2) + ' | ' + (r[8] || '') + ' | ' + (r[9] || ''));
+  }
+  sendTelegram_(chatId, out.join('\n'));
+}
+
+/** ظ…ظ„ط®طµ ط§ظ„ظٹظˆظ…/ط§ظ„ط£ط³ط¨ظˆط¹/ط§ظ„ط´ظ‡ط± */
+function sendPeriodSummary_(chatId, mode) {
+  var cache = CacheService.getScriptCache();
+  var key = 'SUM_' + mode;
+  var cached = cache.get(key);
+  if (cached) { sendTelegram_(chatId, cached); return; }
+
+  var now = new Date(), start, end;
+  if (mode === 'today') {
+    start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+    end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0);
+  } else if (mode === 'week') {
+    var day = now.getDay();
+    var offsetToSat = (day + 1) % 7;
+    start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - offsetToSat, 0, 0, 0);
+    end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 7, 0, 0, 0);
+  } else {
+    start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
+    end = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0);
+  }
+
+  var s1 = _sheet('Sheet1');
+  var rows = s1.getDataRange().getValues();
+  var spend = 0, income = 0, byCat = {};
+
+  for (var i = 1; i < rows.length; i++) {
+    var d = rows[i][0];
+    if (!(d instanceof Date)) continue;
+    if (d < start || d >= end) continue;
+
+    var amt = Number(rows[i][7]) || 0;
+    var cat = String(rows[i][9] || 'ط£ط®ط±ظ‰');
+    var type = String(rows[i][10] || '');
+    var raw = String(rows[i][11] || '');
+    var incoming = /(ظˆط§ط±ط¯|ط¥ظٹط¯ط§ط¹|ط§ط³طھظ„ط§ظ…)/i.test(type) || /(ظˆط§ط±ط¯|ط¥ظٹط¯ط§ط¹|ط§ط³طھظ„ط§ظ…)/i.test(raw);
+
+    if (incoming) income += amt;
+    else { spend += amt; byCat[cat] = (byCat[cat] || 0) + amt; }
+  }
+
+  var title = (mode === 'today') ? 'ًں“… ظ…ظ„ط®طµ ط§ظ„ظٹظˆظ…' : (mode === 'week' ? 'ًں—“ï¸ڈ ظ…ظ„ط®طµ ط§ظ„ط£ط³ط¨ظˆط¹' : 'ًں—“ï¸ڈ ظ…ظ„ط®طµ ط§ظ„ط´ظ‡ط±');
+  var top = Object.keys(byCat).sort(function(a,b){return byCat[b]-byCat[a];}).slice(0,6)
+    .map(function(k){ return 'â€¢ ' + k + ': ' + byCat[k].toFixed(2); });
+
+  var msg = title + '\n' +
+    'ط§ظ„ط¯ط®ظ„: ' + income.toFixed(2) + ' SAR\n' +
+    'ط§ظ„ظ…طµط±ظˆظپ: ' + spend.toFixed(2) + ' SAR\n' +
+    'ط§ظ„طµط§ظپظٹ: ' + (income - spend).toFixed(2) + ' SAR\n' +
+    (top.length ? ('â”پâ”پâ”پâ”پâ”پâ”پâ”پâ”پâ”پâ”پâ”پâ”پ\nط£ط¹ظ„ظ‰ ط§ظ„طھطµظ†ظٹظپط§طھ:\n' + top.join('\n')) : '');
+
+  cache.put(key, msg, 15);
+  sendTelegram_(chatId, msg);
+}
+
+/** ط¨ط·ط§ظ‚ط© ط¹ظ…ظ„ظٹط© ظ†ط¸ظٹظپط© (ط¨ط¯ظˆظ† ط£ط²ط±ط§ط±) */
+function sendSovereignReportV120(ai, sync, src, raw, destChatId) {
+  var hub = String(destChatId || getHubChatId_() || '');
+  if (!hub) return;
+
+  var amount = Number(ai && ai.amount ? ai.amount : 0);
+  var merchant = (ai && ai.merchant) ? String(ai.merchant) : 'ط؛ظٹط± ظ…ط­ط¯ط¯';
+  var category = (ai && ai.category) ? String(ai.category) : 'ط£ط®ط±ظ‰';
+  var type = (ai && ai.type) ? String(ai.type) : 'ط­ظˆط§ظ„ط©';
+  var isIncoming = !!(ai && ai.isIncoming);
+  var budgetRem = Number(sync && sync.budget ? sync.budget : 0);
+
+  var html =
+    'ًں§¾ <b>ط¹ظ…ظ„ظٹط© ط¬ط¯ظٹط¯ط© â€” V120</b>\n' +
+    'ًں’° <b>' + escHtml_(amount.toFixed(2)) + ' SAR</b> ' + (isIncoming ? '(ظˆط§ط±ط¯)' : '(طµط§ط¯ط±)') + '\n' +
+    'ًں‘¤ ' + escHtml_(merchant) + '\n' +
+    'ًںڈ·ï¸ڈ ' + escHtml_(category) + ' | ' + escHtml_(type) + '\n' +
+    'ًں“‰ ط§ظ„ظ…طھط¨ظ‚ظٹ (ظ…ظٹط²ط§ظ†ظٹط©): ' + escHtml_(budgetRem.toFixed(2)) + ' SAR\n' +
+    'ًں“‌ ' + escHtml_(raw || '');
+
+  sendTelegramLogged_(hub, html, { parse_mode: 'HTML' });
+
+  // ط£ط±ط´ظپط© ط§ط®طھظٹط§ط±ظٹط©
+  var arch = getArchiveChatId_();
+  if (arch && arch !== hub) {
+    sendTelegramLogged_(arch, html, { parse_mode: 'HTML' });
+  }
+}
+
+/** ظ„ظ… ظ†ط¹ط¯ ظ†ط­طھط§ط¬ callback_query â€” ظ†طھط±ظƒظ‡ط§ ظƒط¥ط±ط´ط§ط¯ */
+function handleInteractionV120(callbackQuery) {
+  // ظ„ط§ ط´ظٹط، â€” ظ„ط£ظ†ظ†ط§ ظ„ظ… ظ†ط¹ط¯ ظ†ط¶ط¹ inline buttons ظ…ط¹ ظƒظ„ ط±ط³ط§ظ„ط©
+}
+
+
+/********** Sovereign V120 â€” R3.3 | Debt.gs **********/
+
+function updateDebtIndex_(data) {
+  try {
+    var sIdx = _sheet('Debt_Index');
+    var party = (data.merchant || 'ط؛ظٹط± ظ…ط­ط¯ط¯');
+    var acct = (data.cardNum || data.accNum || '');
+
+    // ظ…ط§ ظ†ط¯ظپط¹ظ‡ = ط¹ظ„ظٹظ‡ظ… ظ„ظ†ط§ (+). ظ…ط§ ظ†ط³طھظ„ظ…ظ‡ ظ…ظ†ظ‡ظ… = ظٹظ‚ظ„ظ‘.
+    var sign = data.isIncoming ? -1 : 1;
+    var delta = sign * (Number(data.amount) || 0);
+
+    var vals = sIdx.getDataRange().getValues();
+    var found = -1;
+
+    for (var i = 1; i < vals.length; i++) {
+      if ((vals[i][0] || '') === party && (vals[i][1] || '') === acct) { found = i; break; }
+    }
+
+    if (found > 0) {
+      var cur = Number(vals[found][2]) || 0;
+      sIdx.getRange(found + 1, 2).setValue(acct);
+      sIdx.getRange(found + 1, 3).setValue(cur + delta);
+      sIdx.getRange(found + 1, 4).setValue(new Date());
+    } else {
+      sIdx.appendRow([party, acct, delta, new Date()]);
+    }
+  } catch (e) { /* ignore */ }
+}
+``
+
+
+/********** Dashboard.gs â€” Improved Layout **********/
+
+function rebuildDashboard() {
+  var ss = _ss();
+  var s1 = _sheet('Sheet1');
+  var sB = _sheet('Budgets');
+  var sDash = _sheet('Dashboard');
+
+  // طھظ†ط¸ظٹظپ ظƒط§ظ…ظ„
+  sDash.clear();
+  var charts = sDash.getCharts();
+  for (var i = 0; i < charts.length; i++) sDash.removeChart(charts[i]);
+
+  sDash.setRightToLeft(true);
+  sDash.setFrozenRows(0);
+
+  // ط¹ظ†ظˆط§ظ†
+  sDash.getRange('A1').setValue('ظ„ظˆط­ط© Sovereign V120');
+  sDash.getRange('A1').setFontSize(14).setFontWeight('bold');
+
+  // ظ†ط³ط® Budgets ط¥ظ„ظ‰ ط§ظ„ط¯ط§ط´ط¨ظˆط±ط¯ (ظ…ظ† A3)
+  var valsB = sB.getDataRange().getValues();
+  if (valsB.length < 1) {
+    sDash.getRange('A3').setValue('ظ„ط§ طھظˆط¬ط¯ ط¨ظٹط§ظ†ط§طھ ظپظٹ Budgets.');
+    return;
+  }
+  sDash.getRange(3, 1, valsB.length, valsB[0].length).setValues(valsB);
+
+  // طھظ†ط³ظٹظ‚ Budgets ط¯ط§ط®ظ„ Dashboard
+  sDash.getRange(3, 2, Math.max(1, valsB.length - 1), 3).setNumberFormat('#,##0.00');
+  sDash.getRange('A3:D3').setFontWeight('bold').setBackground('#f3f3f3');
+
+  // ظ…ظ„ط®طµ ط£ط¹ظ„ظ‰ (F2:H4)
+  var totalBudget = 0, totalSpent = 0, totalRem = 0;
+  for (var r = 1; r < valsB.length; r++) {
+    totalBudget += Number(valsB[r][1]) || 0;
+    totalSpent += Number(valsB[r][2]) || 0;
+    totalRem += Number(valsB[r][3]) || 0;
+  }
+
+  sDash.getRange('F2').setValue('ظ…ظ„ط®طµ ط§ظ„ط´ظ‡ط±');
+  sDash.getRange('F2').setFontWeight('bold');
+
+  sDash.getRange('F3').setValue('ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظ…ظˆط§ط²ظ†ط©');
+  sDash.getRange('G3').setValue(totalBudget);
+  sDash.getRange('F4').setValue('ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظ…طµط±ظˆظپ');
+  sDash.getRange('G4').setValue(totalSpent);
+  sDash.getRange('F5').setValue('ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظ…طھط¨ظ‚ظٹ');
+  sDash.getRange('G5').setValue(totalRem);
+
+  sDash.getRange('G3:G5').setNumberFormat('#,##0.00');
+  sDash.getRange('F3:F5').setFontWeight('bold').setBackground('#fafafa');
+  sDash.getRange('G3:G5').setBackground('#fafafa');
+
+  // طھط¬ظ‡ظٹط² ط¨ظٹط§ظ†ط§طھ ط§ظ„ظ…طµط±ظˆظپ ط§ظ„ظٹظˆظ…ظٹ ظپظٹ (A20:B..)
+  var rows = s1.getDataRange().getValues();
+  var now = new Date(), m = now.getMonth(), y = now.getFullYear();
+  var daily = {};
+
+  for (var i2 = 1; i2 < rows.length; i2++) {
+    var d = rows[i2][0];
+    if (!(d instanceof Date)) continue;
+    if (d.getMonth() !== m || d.getFullYear() !== y) continue;
+
+    var amt = Number(rows[i2][7]) || 0;
+    var type = String(rows[i2][10] || '');
+    var raw = String(rows[i2][11] || '');
+    var incoming = /(ظˆط§ط±ط¯|ط¥ظٹط¯ط§ط¹|ط§ط³طھظ„ط§ظ…)/i.test(type) || /(ظˆط§ط±ط¯|ط¥ظٹط¯ط§ط¹|ط§ط³طھظ„ط§ظ…)/i.test(raw);
+
+    var spent = incoming ? 0 : amt; // ط§ظ„ظ…طµط±ظˆظپ ظپظ‚ط·
+    var key = Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    daily[key] = (daily[key] || 0) + Math.max(spent, 0);
+  }
+
+  var days = Object.keys(daily).sort();
+  sDash.getRange('A18').setValue('ط§ظ„ظ…طµط±ظˆظپ ط§ظ„ظٹظˆظ…ظٹ (ط§ظ„ط´ظ‡ط± ط§ظ„ط¬ط§ط±ظٹ)');
+  sDash.getRange('A18').setFontWeight('bold');
+
+  sDash.getRange('A19').setValue('ط§ظ„طھط§ط±ظٹط®');
+  sDash.getRange('B19').setValue('ط§ظ„ظ…طµط±ظˆظپ');
+  sDash.getRange('A19:B19').setFontWeight('bold').setBackground('#f3f3f3');
+
+  if (days.length) {
+    var out = [];
+    for (var k = 0; k < days.length; k++) out.push([days[k], daily[days[k]]]);
+    sDash.getRange(20, 1, out.length, 2).setValues(out);
+    sDash.getRange(20, 1, out.length, 1).setNumberFormat('yyyy-MM-dd');
+    sDash.getRange(20, 2, out.length, 1).setNumberFormat('#,##0.00');
+  } else {
+    sDash.getRange('A20').setValue('ظ„ط§ طھظˆط¬ط¯ ط¨ظٹط§ظ†ط§طھ ظ„ظ‡ط°ط§ ط§ظ„ط´ظ‡ط± ظپظٹ Sheet1.');
+  }
+
+  // ط¥ط¯ط±ط§ط¬ ط§ظ„ط±ط³ظˆظ… (ظٹظ…ظٹظ† ط§ظ„ط¬ط¯ظˆظ„)
+  try {
+    // Pie: A3:B?
+    var pie = sDash.newChart().asPieChart()
+      .addRange(sDash.getRange(3, 1, valsB.length, 2))
+      .setOption('title', 'ط§ظ„ط¥ظ†ظپط§ظ‚ ط­ط³ط¨ ط§ظ„طھطµظ†ظٹظپ')
+      .setPosition(3, 6, 0, 0)
+      .build();
+    sDash.insertChart(pie);
+  } catch (e1) {}
+
+  try {
+    // Column: A3:D?
+    var col = sDash.newChart().asColumnChart()
+      .addRange(sDash.getRange(3, 1, valsB.length, 4))
+      .setOption('title', 'ظ…ظˆط§ط²ظ†ط© ظ…ظ‚ط§ط¨ظ„ ظ…طµط±ظˆظپ ظˆظ…طھظژط¨ظ‚ظ‘ظٹ')
+      .setOption('legend', { position: 'bottom' })
+      .setPosition(16, 6, 0, 0)
+      .build();
+    sDash.insertChart(col);
+  } catch (e2) {}
+
+  try {
+    // Line chart ظ„ظ„ط¥ظ†ظپط§ظ‚ ط§ظ„ظٹظˆظ…ظٹ: A19:B..
+    var lastRowDaily = 20 + Math.max(0, days.length - 1);
+    if (days.length) {
+      var line = sDash.newChart().asLineChart()
+        .addRange(sDash.getRange(19, 1, lastRowDaily - 18, 2))
+        .setOption('title', 'ط§ظ„ظ…طµط±ظˆظپ ط§ظ„ظٹظˆظ…ظٹ')
+        .setPosition(30, 1, 0, 0)
+        .build();
+      sDash.insertChart(line);
+    }
+  } catch (e3) {}
+
+  // طھط­ط³ظٹظ† ط¹ط±ط¶ ط§ظ„ط£ط¹ظ…ط¯ط©
+  try {
+    sDash.autoResizeColumns(1, 8);
+    sDash.setColumnWidths(1, 1, 170);
+    sDash.setColumnWidths(2, 1, 130);
+  } catch (e4) {}
+
+  safeNotify('âœ… Dashboard: طھظ… ط¥ط¹ط§ط¯ط© ط¨ظ†ط§ط، ظ„ظˆط­ط© ط§ظ„ظ…ط¹ظ„ظˆظ…ط§طھ ط¨طھط®ط·ظٹط· ظ…ظڈط­ط³ظ‘ظ†.');
+}
+
+
+/********** Sovereign V120 â€” R3.3 | Triggers.gs **********/
+
+function resetSystemKeepSalary() {
+  var s1 = _sheet('Sheet1');
+  var sD = _sheet('Debt_Ledger');
+  var sDash = _sheet('Dashboard');
+  var sB = _sheet('Budgets');
+
+  if (s1.getLastRow() > 1) s1.getRange(2, 1, s1.getLastRow() - 1, 12).clearContent();
+  if (sD.getLastRow() > 1) sD.getRange(2, 1, sD.getLastRow() - 1, 6).clearContent();
+  if (sDash.getMaxRows() > 1) sDash.clear();
+
+  var found = false;
+  var vals = sB.getDataRange().getValues();
+  for (var i = 1; i < vals.length; i++) {
+    if (String(vals[i][0] || '') === 'ط§ظ„ط±ط§طھط¨') {
+      sB.getRange(i + 1, 1, 1, 4).setValues([['ط§ظ„ط±ط§طھط¨', 5000, 0, 5000]]);
+      found = true;
+      break;
+    }
+  }
+  if (!found) sB.appendRow(['ط§ظ„ط±ط§طھط¨', 5000, 0, 5000]);
+
+  safeNotify('ًں§¹ طھظ…ظ‘طھ ط¥ط¹ط§ط¯ط© ط§ظ„ط¶ط¨ط· ظ…ط¹ طھط«ط¨ظٹطھ ط¨ظ†ط¯ ط§ظ„ط±ط§طھط¨ 5000. ط³ظٹطھظ… ط¥ط¯ط±ط§ط¬ ط±ط§طھط¨ ظٹظˆظ… 27 طھظ„ظ‚ط§ط¦ظٹظ‹ط§.');
+}
+
+function setupTimeTriggers() {
+  deleteTriggers_(['weeklyReport', 'monthlyReport', 'insertMonthlySalary']);
+
+  ScriptApp.newTrigger('weeklyReport')
+    .timeBased()
+    .onWeekDay(ScriptApp.WeekDay.SATURDAY)
+    .atHour(20)
+    .create();
+
+  ScriptApp.newTrigger('monthlyReport')
+    .timeBased()
+    .onMonthDay(26)
+    .atHour(20)
+    .create();
+
+  ScriptApp.newTrigger('insertMonthlySalary')
+    .timeBased()
+    .onMonthDay(27)
+    .atHour(9)
+    .create();
+
+  safeNotify('âڈ° طھظ… ط¥ط¹ط¯ط§ط¯ ط§ظ„ظ…ط´ط؛ظ„ط§طھ: ط³ط¨طھ ط£ط³ط¨ظˆط¹ظٹظ‹ط§طŒ 26 ط´ظ‡ط±ظٹظ‹ط§ طھظ‚ط±ظٹط±طŒ 27 ط´ظ‡ط±ظٹظ‹ط§ ط±ط§طھط¨.');
+}
+
+function deleteTriggers_(names) {
+  var ts = ScriptApp.getProjectTriggers();
+  ts.forEach(function (t) {
+    if (names.indexOf(t.getHandlerFunction()) >= 0) ScriptApp.deleteTrigger(t);
+  });
+}
+
+function insertMonthlySalary() {
+  var ai = {
+    merchant: 'ط±ط§طھط¨',
+    amount: 5000,
+    currency: 'SAR',
+    category: 'ط§ظ„ط±ط§طھط¨',
+    type: 'ط­ظˆط§ظ„ط©',
+    isIncoming: true,
+    accNum: 'ط§ظ„ط±ط§طھط¨',
+    cardNum: ''
+  };
+
+  var sync = syncQuadV120(ai, 'ط±ط§طھط¨ ط´ظ‡ط±ظٹ 5000', 'ط±ط§طھط¨_ظ…ط¬ط¯ظˆظژظ„');
+  sendSovereignReportV120(ai, sync, 'ط±ط§طھط¨_ظ…ط¬ط¯ظˆظژظ„', 'ط±ط§طھط¨ ط´ظ‡ط±ظٹ 5000', ENV.CHAT_ID);
+}
+
+function weeklyReport() {
+  var s1 = _sheet('Sheet1');
+  var rows = s1.getDataRange().getValues();
+
+  var now = new Date();
+  var day = now.getDay();
+
+  // ط§ظ„ط³ط¨طھ ط§ظ„ط­ط§ظ„ظٹ (ط¨ط¯ط§ظٹط© ظ†ط§ظپط°ط© ط§ظ„طھظ‚ط±ظٹط±)
+  var todaySat = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((day + 1) % 7));
+  var lastSat = new Date(todaySat.getFullYear(), todaySat.getMonth(), todaySat.getDate() - 7);
+
+  var sum = 0, byCat = {};
+  for (var i = 1; i < rows.length; i++) {
+    var d = rows[i][0];
+    if (!(d instanceof Date)) continue;
+
+    if (d >= lastSat && d < todaySat) {
+      var amt = Number(rows[i][7]) || 0;
+      var cat = String(rows[i][9] || 'ط£ط®ط±ظ‰');
+      var type = String(rows[i][10] || '');
+      var raw = String(rows[i][11] || '');
+
+      var incoming = /(ظˆط§ط±ط¯|ط¥ظٹط¯ط§ط¹|ط§ط³طھظ„ط§ظ…)/i.test(type) || /(ظˆط§ط±ط¯|ط¥ظٹط¯ط§ط¹|ط§ط³طھظ„ط§ظ…)/i.test(raw);
+      if (!incoming) {
+        sum += amt;
+        byCat[cat] = (byCat[cat] || 0) + amt;
+      }
+    }
+  }
+
+  var lines = [];
+  for (var k in byCat) lines.push('â€¢ ' + k + ': ' + byCat[k].toFixed(2));
+
+  var msg = 'ًں“… طھظ‚ط±ظٹط± ط£ط³ط¨ظˆط¹ظٹ (ط§ظ„ط³ط¨طھâ€“ط§ظ„ط¬ظ…ط¹ط©)\n' +
+    'ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظ…طµط±ظˆظپ: ' + sum.toFixed(2) + ' SAR\n' +
+    (lines.length ? ('طھظپطµظٹظ„:\n' + lines.join('\n')) : '');
+
+  sendTelegram_(ENV.CHAT_ID, msg);
+}
+
+function monthlyReport() {
+  var s1 = _sheet('Sheet1');
+  var rows = s1.getDataRange().getValues();
+
+  var now = new Date();
+  var start = new Date(now.getFullYear(), now.getMonth(), 1);
+  var end = new Date(now.getFullYear(), now.getMonth(), 27); // 1â€“26
+
+  var sum = 0, byCat = {};
+  for (var i = 1; i < rows.length; i++) {
+    var d = rows[i][0];
+    if (!(d instanceof Date)) continue;
+
+    if (d >= start && d < end) {
+      var amt = Number(rows[i][7]) || 0;
+      var cat = String(rows[i][9] || 'ط£ط®ط±ظ‰');
+      var type = String(rows[i][10] || '');
+      var raw = String(rows[i][11] || '');
+
+      var incoming = /(ظˆط§ط±ط¯|ط¥ظٹط¯ط§ط¹|ط§ط³طھظ„ط§ظ…)/i.test(type) || /(ظˆط§ط±ط¯|ط¥ظٹط¯ط§ط¹|ط§ط³طھظ„ط§ظ…)/i.test(raw);
+      if (!incoming) {
+        sum += amt;
+        byCat[cat] = (byCat[cat] || 0) + amt;
+      }
+    }
+  }
+
+  var lines = [];
+  for (var k in byCat) lines.push('â€¢ ' + k + ': ' + byCat[k].toFixed(2));
+
+  var msg = 'ًں“† طھظ‚ط±ظٹط± ط´ظ‡ط±ظٹ (1â€“26)\n' +
+    'ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظ…طµط±ظˆظپ: ' + sum.toFixed(2) + ' SAR\n' +
+    (lines.length ? ('طھظپطµظٹظ„:\n' + lines.join('\n')) : '');
+
+  sendTelegram_(ENV.CHAT_ID, msg);
+}
+
+
+/********** Setup.gs â€” V120 Menu (LIGHT default) **********/
+
+function onOpen(e) {
+  try {
+    var ui = SpreadsheetApp.getUi();
+
+    // ===== ط§ظ„ظ‚ط§ط¦ظ…ط© ط§ظ„ط±ط¦ظٹط³ظٹط© =====
+    var menu = ui.createMenu('V120');
+
+    // 1) طھط´ط؛ظٹظ„ ط³ط±ظٹط¹ (LIGHT) â€” ط§ظپطھط±ط§ط¶ظٹ
+    menu.addItem('âœ… طھط´ط؛ظٹظ„ ط³ط±ظٹط¹ (LIGHT) â€” ط§ظپطھط±ط§ط¶ظٹ', 'V120_MasterRun_LIGHT');
+
+    // 2) ط£ظ‡ظ… ط§ظ„ط¹ظ…ظ„ظٹط§طھ ط§ظ„ظٹظˆظ…ظٹط©
+    menu.addSeparator();
+    menu.addSubMenu(
+      ui.createMenu('ًں§© طھط´ط؛ظٹظ„ ظٹظˆظ…ظٹ')
+        .addItem('ًں§± طھظ‡ظٹط¦ط© ط£ظˆظ„ظٹط© (Initial)', 'initialsystem')
+        .addItem('ًں§ھ ط²ط±ط¹ ط§ظ„طµظٹط؛ (Seed Formulas)', 'test_10_seed_formulas')
+        .addItem('ًںŒگ Seed Classifier (AR)', 'seedClassifierMap_AR')
+        .addSeparator()
+        .addItem('ًں§® ط¥ط¹ط§ط¯ط© ط§ط­طھط³ط§ط¨ ط§ظ„ظ…ظٹط²ط§ظ†ظٹط© (ظ…ظ† Sheet1)', 'test_05_recompute_budgets_from_sheet1')
+        .addItem('ًں“ٹ ط¥ط¹ط§ط¯ط© ط¨ظ†ط§ط، Dashboard (ظ…ط­ط³ظ‘ظ†)', 'rebuildDashboard')
+        .addSeparator()
+        .addItem('ًں“ٹ ط¥ط±ط³ط§ظ„ Snapshot (Budgets)', 'test_08_send_snapshot')
+    );
+
+    // 3) ط§ط®طھط¨ط§ط±ط§طھ ظˆطھط´ط®ظٹطµ
+    menu.addSubMenu(
+      ui.createMenu('ًں§ھ ط§ط®طھط¨ط§ط±ط§طھ ظˆطھط´ط®ظٹطµ')
+        .addItem('ًںŒگ Probe Webhook (GET/POST)', 'test_01_probeWebhook')
+        .addItem('ًں¤– AI Diagnostics', 'test_AI_Diagnostics')
+        .addSeparator()
+        .addItem('ًں“¥ ظپظ„ظˆ ظˆط§ط±ط¯ (ط¹ظٹظ†ط©)', 'test_03_flow_incoming_sample')
+        .addItem('ًں“¤ ظپظ„ظˆ طµط§ط¯ط± (ط¹ظٹظ†ط©)', 'test_04_flow_outgoing_sample')
+    );
+
+    // 4) طµظٹط§ظ†ط©/ط¥ط¯ط§ط±ط© (ظ„ظ…ظ†ط¹ طھظ„ظˆظٹط« ط§ظ„ط¨ظٹط§ظ†ط§طھ)
+    menu.addSubMenu(
+      ui.createMenu('ًں› ï¸ڈ طµظٹط§ظ†ط© ظˆط¥ط¯ط§ط±ط©')
+        .addItem('ًں”’ طھظپط¹ظٹظ„ ظˆط¶ط¹ ط§ظ„طµظٹط§ظ†ط© (ON)', 'V120_Maintenance_ON')
+        .addItem('ًں”“ ط¥ظ„ط؛ط§ط، ظˆط¶ط¹ ط§ظ„طµظٹط§ظ†ط© (OFF)', 'V120_Maintenance_OFF')
+        .addSeparator()
+        .addItem('ًں§¹ Reset Ledgers (Debt/Budgets/Dashboard)', 'resetLedgers_KeepHeaders')
+        .addSeparator()
+        .addItem('ًں§½ TestReset (LIGHT) â€” ظٹط­ط§ظپط¸ ط¹ظ„ظ‰ Sheet1', 'V120_TestReset_LIGHT_KeepSheet1')
+        .addItem('ًں§½ TestReset (FULL) â€” ظٹظ…ط³ط­ Sheet1', 'V120_TestReset_FULL_WipeSheet1')
+        .addSeparator()
+        .addItem('ًں”پ طھط¹ظٹظٹظ†/ط¥طµظ„ط§ط­ Webhook (DIRECT)', 'setWebhook_DIRECT_no302')
+        .addItem('â›” ط¥ظٹظ‚ط§ظپ Webhook طھظٹظ„ظٹط¬ط±ط§ظ… + طھطµظپظٹط± Pending', 'V120_StopTelegramWebhook_NOW')
+    );
+
+    // 5) ظ…طھظ‚ط¯ظ… (FULL ط¹ظ†ط¯ ط§ظ„ط­ط§ط¬ط© ظپظ‚ط·)
+    menu.addSeparator();
+    menu.addSubMenu(
+      ui.createMenu('âڑ، ظ…طھظ‚ط¯ظ…')
+        .addItem('ًں§ھ طھط´ط؛ظٹظ„ ط´ط§ظ…ظ„ (FULL) â€” ظٹظ…ط³ط­ Sheet1', 'V120_MasterRun_FULL')
+        .addSeparator()
+        .addItem('âœ… ظپط­طµ ط§ظ„ط¨ظٹط¦ط© (Healthcheck)', 'test_00_healthcheck')
+    );
+
+    menu.addToUi();
+
+  } catch (err) {
+    console.log('onOpen error: ' + err);
+  }
+}
+
+/** ط؛ظ„ط§ظپ ظ„ظ„طھظˆط§ظپظ‚ (ط¥ط°ط§ ط§ط­طھط¬طھظ‡ ط§ظ„ظ‚ط§ط¦ظ…ط©) */
+function initialsystem() {
+  if (typeof V120_runInitial_ === 'function') return V120_runInitial_();
+  throw new Error('V120_runInitial_ ط؛ظٹط± ظ…ظˆط¬ظˆط¯ط© â€” طھط£ظƒط¯ ظ…ظ† InitCompat.gs');
+}
+
+
+/********** ط¥ط¶ط§ظپط§طھ ط§ط®طھط¨ط§ط±ط§طھ V120 (Restore) **********/
+
+function test_03_flow_incoming_sample() {
+  // ط¹ظٹظ†ط© ظˆط§ط±ط¯
+  executeUniversalFlowV120(
+    'ط­ظˆط§ظ„ط© ظˆط§ط±ط¯ط© ط¨ظ€ 2000 SAR ظ…ظ† ظ…ط­ظ…ط¯ ط§ظ„ط­ط±ط¨ظٹ ط¥ظ„ظ‰ ط­ط³ط§ط¨ 8001',
+    'ط§ط®طھط¨ط§ط±_ظˆط§ط±ط¯',
+    getHubChatId_ ? getHubChatId_() : (ENV.CHAT_ID || null)
+  );
+  safeNotify('âœ… ظپظ„ظˆ ظˆط§ط±ط¯: طھظ… ط§ظ„طھط³ط¬ظٹظ„ ظˆط§ظ„ط¥ط±ط³ط§ظ„.');
+}
+
+function test_04_flow_outgoing_sample() {
+  // ط¹ظٹظ†ط© طµط§ط¯ط±
+  executeUniversalFlowV120(
+    'طھط­ظˆظٹظ„ طµط§ط¯ط± 350 SAR ظ…ظ† ط­ط³ط§ط¨ 4912 ط¥ظ„ظ‰ طھط§ط¬ط± ط¨ظ†ط¯ظ‡ POS',
+    'ط§ط®طھط¨ط§ط±_طµط§ط¯ط±',
+    getHubChatId_ ? getHubChatId_() : (ENV.CHAT_ID || null)
+  );
+  safeNotify('âœ… ظپظ„ظˆ طµط§ط¯ط±: طھظ… ط§ظ„طھط³ط¬ظٹظ„ ظˆط§ظ„ط¥ط±ط³ط§ظ„.');
+}
+
+function test_05_recompute_budgets_from_sheet1() {
+  var sB = _sheet('Budgets');
+  var s1 = _sheet('Sheet1');
+
+  // طھطµظپظٹط± ط§ظ„ظ…طµط±ظˆظپط§طھ
+  var lastB = sB.getLastRow();
+  if (lastB >= 2) sB.getRange(2, 3, lastB - 1, 1).setValue(0);
+
+  // ط§ط­طھط³ط§ط¨ ط§ظ„ط´ظ‡ط± ط§ظ„ط¬ط§ط±ظٹ
+  var now = new Date(), m = now.getMonth(), y = now.getFullYear();
+  var rows = s1.getDataRange().getValues();
+  var sums = {};
+
+  for (var i = 1; i < rows.length; i++) {
+    var r = rows[i];
+    var d = r[0];
+    if (!(d instanceof Date)) continue;
+    if (d.getMonth() !== m || d.getFullYear() !== y) continue;
+
+    var amt = Number(r[7]) || 0;
+    var cat = String(r[9] || 'ط£ط®ط±ظ‰');
+    var type = String(r[10] || '');
+    var raw = String(r[11] || '');
+
+    var incoming = /(ظˆط§ط±ط¯|ط¥ظٹط¯ط§ط¹|ط§ط³طھظ„ط§ظ…)/i.test(type) || /(ظˆط§ط±ط¯|ط¥ظٹط¯ط§ط¹|ط§ط³طھظ„ط§ظ…)/i.test(raw);
+    var delta = incoming ? -amt : amt;
+
+    sums[cat] = (sums[cat] || 0) + delta;
+  }
+
+  var bVals = sB.getDataRange().getValues();
+  for (var j = 1; j < bVals.length; j++) {
+    var cat2 = String(bVals[j][0] || '');
+    sB.getRange(j + 1, 3).setValue(sums[cat2] || 0);
+  }
+
+  safeNotify('âœ… ط£ط¹ظٹط¯ ط§ط­طھط³ط§ط¨ Budgets!C ظ…ظ† Sheet1 ظ„ظ„ط´ظ‡ط± ط§ظ„ط¬ط§ط±ظٹ.');
+}
+
+function test_08_send_snapshot() {
+  // طھظ‚ط±ظٹط± ط³ط±ظٹط¹ ط¥ظ„ظ‰ طھظٹظ„ظٹط¬ط±ط§ظ…
+  sendBudgetsSnapshotToTelegram_();
+  safeNotify('âœ… ط£ظڈط±ط³ظ„ طھظ‚ط±ظٹط± snapshot.');
+}
+
+
+/********** Sovereign V120 â€” R3.3 | Reclassify.gs **********/
+
+function reclassifyLastRowsAndBudget_(n, newCategory) {
+  n = n || 1;
+  newCategory = newCategory || 'ظ…ط´طھط±ظٹط§طھ ط¹ط§ظ…ط©';
+
+  var s1 = _sheet('Sheet1');
+  var sB = _sheet('Budgets');
+
+  var last = s1.getLastRow();
+  var start = Math.max(2, last - n + 1);
+
+  for (var r = start; r <= last; r++) {
+    var oldCat = String(s1.getRange(r, 10).getValue() || 'ط£ط®ط±ظ‰');
+    var amt = Number(s1.getRange(r, 8).getValue()) || 0;
+    var type = String(s1.getRange(r, 11).getValue() || '');
+    var raw = String(s1.getRange(r, 12).getValue() || '');
+
+    var incoming = /(ظˆط§ط±ط¯|ط¥ظٹط¯ط§ط¹|ط§ط³طھظ„ط§ظ…)/i.test(type) || /(ظˆط§ط±ط¯|ط¥ظٹط¯ط§ط¹|ط§ط³طھظ„ط§ظ…)/i.test(raw);
+    var delta = incoming ? -amt : amt;
+
+    // ظ†ط¹ظƒط³ ط£ط«ط± ط§ظ„طھطµظ†ظٹظپ ط§ظ„ظ‚ط¯ظٹظ… ط«ظ… ظ†ط·ط¨ظ‘ظ‚ ط£ط«ط± ط§ظ„طھطµظ†ظٹظپ ط§ظ„ط¬ط¯ظٹط¯
+    _addToBudgetSpent(sB, oldCat, -delta);
+    _addToBudgetSpent(sB, newCategory, delta);
+
+    s1.getRange(r, 10).setValue(newCategory);
+  }
+}
+
+function _addToBudgetSpent(sB, cat, delta) {
+  var vals = sB.getDataRange().getValues();
+
+  for (var i = 1; i < vals.length; i++) {
+    if (String(vals[i][0] || '') === String(cat || '')) {
+      var cur = Number(vals[i][2]) || 0;
+      sB.getRange(i + 1, 3).setValue(cur + delta);
+      return;
+    }
+  }
+
+  // ط¥ط°ط§ ط§ظ„طھطµظ†ظٹظپ ط؛ظٹط± ظ…ظˆط¬ظˆط¯ ظپظٹ Budgets ظ†ط¶ظٹظپظ‡
+  var row = sB.getLastRow() + 1;
+  var spent = Math.max(0, delta);
+  sB.getRange(row, 1, 1, 4).setValues([[cat, 0, spent, 0 - spent]]);
+}
+
+
+/********** Sovereign V120 â€” R3.3 | ClassifierSeed.gs **********/
+
+function seedClassifierMap_AR() {
+  var sMap = _sheet('Classifier_Map');
+  var headers = ['ظƒظ„ظ…ط© ظ…ظپطھط§ط­ظٹط©','ط§ظ„طھطµظ†ظٹظپ','ط§ظ„ظ†ظˆط¹','isIncoming','accNum','cardNum'];
+
+  if (sMap.getLastRow() === 0) sMap.appendRow(headers);
+
+  var seed = [
+    ['tiqmo','ظ…ط­ط§ظپط¸ ط±ظ‚ظ…ظٹط©','ط­ظˆط§ظ„ط©',false,'',''],['طھظٹظ‚ظ…ظˆ','ظ…ط­ط§ظپط¸ ط±ظ‚ظ…ظٹط©','ط­ظˆط§ظ„ط©',false,'',''],
+    ['tiqmo pay','ظ…ط­ط§ظپط¸ ط±ظ‚ظ…ظٹط©','ط­ظˆط§ظ„ط©',false,'',''],['stcpay','ظ…ط­ط§ظپط¸ ط±ظ‚ظ…ظٹط©','ط­ظˆط§ظ„ط©',false,'',''],
+    ['stc pay','ظ…ط­ط§ظپط¸ ط±ظ‚ظ…ظٹط©','ط­ظˆط§ظ„ط©',false,'',''],['ط¥ط³ طھظٹ ط³ظٹ ط¨ط§ظٹ','ظ…ط­ط§ظپط¸ ط±ظ‚ظ…ظٹط©','ط­ظˆط§ظ„ط©',false,'',''],
+
+    ['pos','ظ…ط´طھط±ظٹط§طھ ط¹ط§ظ…ط©','ظ…ط´طھط±ظٹط§طھ',false,'',''],['ظ…ط¯ظ‰','ظ…ط´طھط±ظٹط§طھ ط¹ط§ظ…ط©','ظ…ط´طھط±ظٹط§طھ',false,'',''],
+
+    ['ط¨ظ†ط¯ظ‡','ظ…ظˆط§ط¯ ط؛ط°ط§ط¦ظٹط©','ظ…ط´طھط±ظٹط§طھ',false,'',''],['ظƒط§ط±ظپظˆط±','ظ…ظˆط§ط¯ ط؛ط°ط§ط¦ظٹط©','ظ…ط´طھط±ظٹط§طھ',false,'',''],
+    ['ظ‡ط§ظٹط¨ط±','ظ…ظˆط§ط¯ ط؛ط°ط§ط¦ظٹط©','ظ…ط´طھط±ظٹط§طھ',false,'',''],['طھظ…ظˆظٹظ†ط§طھ','ظ…ظˆط§ط¯ ط؛ط°ط§ط¦ظٹط©','ظ…ط´طھط±ظٹط§طھ',false,'',''],
+
+    ['ظ…ط·ط¹ظ…','ظ…ط·ط§ط¹ظ…','ظ…ط´طھط±ظٹط§طھ',false,'',''],['ظ…ط§ظƒط¯ظˆظ†ط§ظ„ط¯ط²','ظ…ط·ط§ط¹ظ…','ظ…ط´طھط±ظٹط§طھ',false,'',''],
+    ['ظ‡ط±ظپظٹ','ظ…ط·ط§ط¹ظ…','ظ…ط´طھط±ظٹط§طھ',false,'',''],['ط¨ط±ط؛ط±','ظ…ط·ط§ط¹ظ…','ظ…ط´طھط±ظٹط§طھ',false,'',''],
+
+    ['ط³طھط§ط±ط¨ظƒط³','ظ…ظ‚ط§ظ‡ظٹ','ظ…ط´طھط±ظٹط§طھ',false,'',''],['ظƒظˆظپظٹ','ظ…ظ‚ط§ظ‡ظٹ','ظ…ط´طھط±ظٹط§طھ',false,'',''],
+
+    ['ط¨ظ†ط²ظٹظ†','ظˆظ‚ظˆط¯','ظ…ط´طھط±ظٹط§طھ',false,'',''],['ظˆظ‚ظˆط¯','ظˆظ‚ظˆط¯','ظ…ط´طھط±ظٹط§طھ',false,'',''],
+    ['gas','ظˆظ‚ظˆط¯','ظ…ط´طھط±ظٹط§طھ',false,'',''],
+
+    ['ظ…ظˆط§ظ‚ظپ','ظ…ظˆط§طµظ„ط§طھ','ط±ط³ظˆظ…',false,'',''],
+    ['طµظٹط¯ظ„ظٹط©','طµظٹط¯ظ„ظٹط§طھ','ظ…ط´طھط±ظٹط§طھ',false,'',''],
+
+    ['stc','ط§طھطµط§ظ„ط§طھ','ظ…ط´طھط±ظٹط§طھ',false,'',''],['ط²ظٹظ†','ط§طھطµط§ظ„ط§طھ','ظ…ط´طھط±ظٹط§طھ',false,'',''],['ظ…ظˆط¨ط§ظٹظ„ظٹ','ط§طھطµط§ظ„ط§طھ','ظ…ط´طھط±ظٹط§طھ',false,'',''],
+
+    ['ظƒظ‡ط±ط¨ط§ط،','ظƒظ‡ط±ط¨ط§ط،','ظ…ط´طھط±ظٹط§طھ',false,'',''],
+    ['ظ…ط§ط،','ظ…ظٹط§ظ‡','ظ…ط´طھط±ظٹط§طھ',false,'',''],['ظ…ظٹط§ظ‡','ظ…ظٹط§ظ‡','ظ…ط´طھط±ظٹط§طھ',false,'',''],
+
+    ['ط±ط³ظˆظ…','ط±ط³ظˆظ… ط®ط¯ظ…ط§طھ','ط±ط³ظˆظ…',false,'',''],
+
+    ['ط§ط´طھط±ط§ظƒ','ط§ط´طھط±ط§ظƒط§طھ ظ…ظ†ط´ط¢طھ','ط±ط³ظˆظ…',false,'',''],['ط¹ط¶ظˆظٹط©','ط§ط´طھط±ط§ظƒط§طھ ظ…ظ†ط´ط¢طھ','ط±ط³ظˆظ…',false,'',''],
+    ['ظ†ط§ط¯ظٹ','ط§ط´طھط±ط§ظƒط§طھ ظ…ظ†ط´ط¢طھ','ط±ط³ظˆظ…',false,'',''],['طµط§ظ„ط©','ط§ط´طھط±ط§ظƒط§طھ ظ…ظ†ط´ط¢طھ','ط±ط³ظˆظ…',false,'',''],
+
+    ['ط³ط­ط¨','ط³ط­ط¨ ظ†ظ‚ط¯ظٹ','ط³ط­ط¨',false,'',''],['atm','ط³ط­ط¨ ظ†ظ‚ط¯ظٹ','ط³ط­ط¨',false,'',''],
+
+    ['ط­ظˆط§ظ„ط© ظˆط§ط±ط¯ط©','ط­ظˆط§ظ„ط§طھ ظˆط§ط±ط¯ط©','ط­ظˆط§ظ„ط©',true,'',''],['طھط­ظˆظٹظ„ ظˆط§ط±ط¯','ط­ظˆط§ظ„ط§طھ ظˆط§ط±ط¯ط©','ط­ظˆط§ظ„ط©',true,'',''],['ط¥ظٹط¯ط§ط¹','ط­ظˆط§ظ„ط§طھ ظˆط§ط±ط¯ط©','ط­ظˆط§ظ„ط©',true,'',''],
+
+    ['ط­ظˆط§ظ„ط© طµط§ط¯ط±ط©','ط­ظˆط§ظ„ط§طھ طµط§ط¯ط±ط©','ط­ظˆط§ظ„ط©',false,'',''],['طھط­ظˆظٹظ„ طµط§ط¯ط±','ط­ظˆط§ظ„ط§طھ طµط§ط¯ط±ط©','ط­ظˆط§ظ„ط©',false,'',''],
+
+    ['paypal','ط®ط¯ظ…ط§طھ ط±ظ‚ظ…ظٹط©','ظ…ط´طھط±ظٹط§طھ',false,'',''],['itunes','ط®ط¯ظ…ط§طھ ط±ظ‚ظ…ظٹط©','ظ…ط´طھط±ظٹط§طھ',false,'',''],['google','ط®ط¯ظ…ط§طھ ط±ظ‚ظ…ظٹط©','ظ…ط´طھط±ظٹط§طھ',false,'','']
+  ];
+
+  // ظپظ‡ط±ط³ط© ط§ظ„ظ…ظˆط¬ظˆط¯ ط­طھظ‰ ظ†ط­ط¯ط« ظˆظ„ط§ ظ†ظƒط±ط±
+  var current = sMap.getDataRange().getValues();
+  var idx = {};
+  for (var i = 1; i < current.length; i++) {
+    var k = String(current[i][0] || '').toLowerCase();
+    if (k) idx[k] = i + 1;
+  }
+
+  var toAppend = [];
+  for (var j = 0; j < seed.length; j++) {
+    var key = String(seed[j][0] || '').toLowerCase();
+    if (!key) continue;
+
+    if (idx[key]) {
+      // طھط­ط¯ظٹط« ط§ظ„ط£ط¹ظ…ط¯ط© 2-4 (ط§ظ„طھطµظ†ظٹظپ/ط§ظ„ظ†ظˆط¹/isIncoming)
+      sMap.getRange(idx[key], 2, 1, 3).setValues([[seed[j][1], seed[j][2], seed[j][3]]]);
+    } else {
+      toAppend.push(seed[j]);
+    }
+  }
+
+  if (toAppend.length) {
+    sMap.getRange(sMap.getLastRow() + 1, 1, toAppend.length, 6).setValues(toAppend);
+  }
+
+  // ط¶ظ…ط§ظ† ظˆط¬ظˆط¯ ط§ظ„طھطµظ†ظٹظپط§طھ ظپظٹ Budgets
+  var cats = {};
+  for (var k2 = 0; k2 < seed.length; k2++) cats[seed[k2][1]] = true;
+  ensureBudgetCats_(Object.keys(cats));
+
+  safeNotify('âœ… طھظ… ط²ط±ط¹ ط§ظ„ظ‚ط§ظ…ظˆط³ ط§ظ„ط¹ط±ط¨ظٹ ظˆطھط­ط¯ظٹط« Budgets ط¹ظ†ط¯ ط§ظ„ط­ط§ط¬ط©.');
+}
+
+function ensureBudgetCats_(cats) {
+  var sB = _sheet('Budgets');
+  var existing = sB.getDataRange().getValues();
+
+  var have = {};
+  for (var i = 1; i < existing.length; i++) have[String(existing[i][0] || '')] = true;
+
+  var adds = [];
+  cats.forEach(function (c) {
+    if (c && !have[c]) {
+      var nextRow = sB.getLastRow() + adds.length + 1;
+      adds.push([c, 0, 0, '=B' + nextRow + '-C' + nextRow]);
+    }
+  });
+
+  if (adds.length) {
+    sB.getRange(sB.getLastRow() + 1, 1, adds.length, 4).setValues(adds);
+  }
+}
+
+
+function diag_sendPingToHub() {
+  var p = PropertiesService.getScriptProperties();
+  var hub = p.getProperty('CHANNEL_ID') || p.getProperty('ADMIN_CHAT_ID') || p.getProperty('CHAT_ID') || '';
+  var token = p.getProperty('TELEGRAM_TOKEN') || '';
+  if (!hub || !token) throw new Error('Missing CHANNEL_ID/ADMIN_CHAT_ID/CHAT_ID or TELEGRAM_TOKEN');
+
+  var resp = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
+    method: 'post',
+    payload: {
+      chat_id: String(hub),
+      text: 'âœ… ط§ط®طھط¨ط§ط± Ping ظ…ظ† GAS ط¥ظ„ظ‰ Bank Transactions Hub\nط§ظ„ظˆظ‚طھ: ' + new Date().toLocaleString()
+    },
+    muteHttpExceptions: true
+  });
+
+  Logger.log(resp.getResponseCode());
+  Logger.log(resp.getContentText());
+
+  // ظ†ظƒطھط¨ ط§ظ„ظ†طھظٹط¬ط© ظپظٹ Sheet1 ظ„ظ„طھظˆط«ظٹظ‚
+  _sheet('Sheet1').appendRow([new Date(), 'TG_PING', '-', '-', 'diag_sendPingToHub', '-', '-', '-', '-', '-', '-', resp.getResponseCode() + ' | ' + resp.getContentText()]);
+}
+``
+
+
+function diag_showChatProps() {
+  var p = PropertiesService.getScriptProperties();
+  var out = {
+    CHAT_ID: p.getProperty('CHAT_ID'),
+    CHANNEL_ID: p.getProperty('CHANNEL_ID'),
+    ADMIN_CHAT_ID: p.getProperty('ADMIN_CHAT_ID'),
+    INGRESS_SECRET: p.getProperty('INGRESS_SECRET'),
+    WEBAPP_URL_DIRECT: p.getProperty('WEBAPP_URL_DIRECT')
+  };
+  Logger.log(JSON.stringify(out, null, 2));
+  _sheet('Sheet1').appendRow([new Date(), 'PROPS_DIAG', '-', '-', 'diag_showChatProps', '-', '-', '-', '-', '-', '-', JSON.stringify(out)]);
+}
+
+
+function cleanup_Sheet1_DebugRows() {
+  var sh = _sheet('Sheet1');
+  var last = sh.getLastRow();
+  if (last < 2) return;
+
+  // ط¹ظ…ظˆط¯ "ط§ظ„ظ…طµط¯ط±" ط¹ظ†ط¯ظƒ ظ‡ظˆ ط§ظ„ط¹ظ…ظˆط¯ B (ط­ط³ط¨ طھظ‡ظٹط¦ط© Sheet1)
+  // ط¥ط°ط§ ط§ط®طھظ„ظپ ط¹ظ†ط¯ظƒطŒ ظ‚ظ„ ظ„ظٹ ظˆط£ط¹ط¯ظ„ظ‡ ظ„ظƒ
+  var colB = sh.getRange(2, 2, last - 1, 1).getValues(); // B2:B
+  var kill = {
+    'INGRESS_DEBUG': true,
+    'TG_SEND_LOG': true,
+    'PROPS_DIAG': true,
+    'TG_PING': true
+    // 'FLOW_ERROR': true  // ظپط¹ظ‘ظ„ظ‡ط§ ط¥ط°ط§ طھط±ظٹط¯ ط­ط°ظپ ط£ط®ط·ط§ط، ط£ظٹط¶ظ‹ط§
+  };
+
+  // ط­ط°ظپ ظ…ظ† ط§ظ„ط£ط³ظپظ„ ظ„ظ„ط£ط¹ظ„ظ‰ ط­طھظ‰ ظ„ط§ طھطھظ„ط®ط¨ط· ط£ط±ظ‚ط§ظ… ط§ظ„طµظپظˆظپ
+  for (var i = colB.length - 1; i >= 0; i--) {
+    var v = String(colB[i][0] || '');
+    if (kill[v]) {
+      sh.deleteRow(i + 2);
+    }
+  }
+}
+
+/********** Reset.gs â€” Reset Ledgers + Optional Dashboard Clear **********/
+
+function resetLedgers_KeepHeaders() {
+  var ss = _ss();
+
+  // 1) Debt_Ledger: keep header row, clear everything below
+  var sD = ss.getSheetByName('Debt_Ledger') || ss.insertSheet('Debt_Ledger');
+  if (sD.getLastRow() > 1) {
+    sD.getRange(2, 1, sD.getLastRow() - 1, sD.getLastColumn()).clearContent();
+  }
+
+  // 2) Debt_Index: keep header row, clear everything below
+  var sIdx = ss.getSheetByName('Debt_Index') || ss.insertSheet('Debt_Index');
+  if (sIdx.getLastRow() > 1) {
+    sIdx.getRange(2, 1, sIdx.getLastRow() - 1, sIdx.getLastColumn()).clearContent();
+  }
+
+  // 3) Dashboard: clear sheet + remove charts (ط§ط®طھظٹط§ط±ظٹ ظ„ظƒظ† ظ…ظپظٹط¯ ط¨ط¹ط¯ ظ…ط³ط­ Sheet1)
+  var sDash = ss.getSheetByName('Dashboard') || ss.insertSheet('Dashboard');
+  sDash.clear();
+  var charts = sDash.getCharts();
+  for (var i = 0; i < charts.length; i++) sDash.removeChart(charts[i]);
+
+  // 4) Budgets: ظ„ط§ ظ†ظ…ط³ط­ "ط§ظ„ظ…ظˆط§ط²ظ†ط©" (B) â€” ظپظ‚ط· ظ†طµظپط± "ط§ظ„ظ…طµط±ظˆظپ" (C) ظˆظ†طھط±ظƒ ط§ظ„ظ…طھط¨ظ‚ظٹ (D) طµظٹط؛ط©
+  var sB = ss.getSheetByName('Budgets') || ss.insertSheet('Budgets');
+  var lastB = sB.getLastRow();
+  if (lastB > 1) {
+    sB.getRange(2, 3, lastB - 1, 1).setValue(0); // C2:C = 0
+  }
+
+  SpreadsheetApp.flush();
+
+  safeNotify('âœ… Reset Ledgers: طھظ… طھطµظپظٹط± Debt_Ledger ظˆDebt_Index ظˆطھطµظپظٹط± ظ…طµط±ظˆظپ Budgets ظˆظ…ط³ط­ Dashboard.');
+}
+``
+
+
+/********** MasterRun.gs â€” طھط´ط؛ظٹظ„ ط´ط§ظ…ظ„ V120 (LIGHT default, FULL on demand) **********/
+
+function V120_MasterRun_LIGHT() {
+  // LIGHT: ظ„ط§ ظٹظ…ط³ط­ Sheet1 (ظٹط­ط§ظپط¸ ط¹ظ„ظ‰ ط§ظ„ط³ط¬ظ„)
+  V120_MasterRun_({
+    wipeSheet1: false,
+    wipeRunLog: false,
+    wipeIngressDebug: true,
+    resetLedgers: false,
+    seedClassifier: true,
+    probeWebhook: true,
+    runAI: true,
+    rebuildDash: true,
+    maintenanceDuringRun: true
+  });
+}
+
+function V120_MasterRun_FULL() {
+  // FULL: ط¨ظٹط¦ط© ط§ط®طھط¨ط§ط± ظ†ط¸ظٹظپط© (ظٹظ…ط³ط­ Sheet1 + ظٹظ†ط¸ظ‘ظپ/ظٹطµظپظ‘ط±)
+  V120_MasterRun_({
+    wipeSheet1: true,
+    wipeRunLog: true,
+    wipeIngressDebug: true,
+    resetLedgers: true,
+    seedClassifier: true,
+    probeWebhook: true,
+    runAI: true,
+    rebuildDash: true,
+    maintenanceDuringRun: true
+  });
+}
+
+function V120_MasterRun_(opt) {
+  opt = opt || {};
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+
+  var started = new Date();
+  var runId = Utilities.getUuid().slice(0, 8);
+
+  try {
+    ensureRunLogSheet_();
+
+    // ظ„ظˆ FULL ظˆ wipeRunLog=true ط§ظ…ط³ط­ ط³ط¬ظ„ ط§ظ„طھط´ط؛ظٹظ„ ظ‚ط¨ظ„ ط§ظ„ط¨ط¯ط،
+    if (opt.wipeRunLog) {
+      clearRunLog_();
+    }
+
+    runLog_(runId, 'ط¨ط¯ط، ط§ظ„طھط´ط؛ظٹظ„ ط§ظ„ط´ط§ظ…ظ„', 'INFO', { opt: opt });
+
+    // 0) ظپط­طµ ط§ظ„ط¨ظٹط¦ط©
+    step_(runId, 'ظپط­طµ ط§ظ„ط¨ظٹط¦ط©', function () {
+      var required = ['SHEET_ID', 'TELEGRAM_TOKEN'];
+      var missing = [];
+      required.forEach(function (k) { if (!ENV[k]) missing.push(k); });
+      if (missing.length) throw new Error('ط®طµط§ط¦طµ ظ†ط§ظ‚طµط©: ' + missing.join(', '));
+    });
+
+    // 1) طھظپط¹ظٹظ„ ظˆط¶ط¹ ط§ظ„طµظٹط§ظ†ط© ط£ط«ظ†ط§ط، ط§ظ„طھط´ط؛ظٹظ„
+    if (opt.maintenanceDuringRun) {
+      step_(runId, 'طھظپط¹ظٹظ„ ظˆط¶ط¹ ط§ظ„طµظٹط§ظ†ط©', function () {
+        setMaintenanceMode_('on');
+      });
+    }
+
+    // 2) Reset ط§ط®طھط¨ط§ط±ظٹ (ظ…ظ† TestReset.gs)
+    step_(runId, 'Reset ط§ط®طھط¨ط§ط±ظٹ', function () {
+      if (typeof V120_TestReset_ !== 'function') {
+        throw new Error('V120_TestReset_ ط؛ظٹط± ظ…ظˆط¬ظˆط¯ط© â€” طھط£ظƒط¯ ظ…ظ† TestReset.gs');
+      }
+      V120_TestReset_({
+        wipeSheet1: !!opt.wipeSheet1,
+        wipeRunLog: false, // ظ„ط§ ظ†ظ…ط³ط­ Run_Log ط£ط«ظ†ط§ط، ط§ظ„طھط´ط؛ظٹظ„ ظ†ظپط³ظ‡
+        wipeIngressDebug: !!opt.wipeIngressDebug
+      });
+    });
+
+    // 3) ط§ظ„طھظ‡ظٹط¦ط© ط§ظ„ط£ظˆظ„ظٹط© (ظ…ظ† InitCompat + InitialSystem)
+    step_(runId, 'طھظ‡ظٹط¦ط© ط£ظˆظ„ظٹط© (Initial)', function () {
+      if (typeof V120_runInitial_ === 'function') {
+        V120_runInitial_();
+        return;
+      }
+      // fallback ط§ط­طھظٹط§ط·ظٹ
+      if (typeof initialsystem === 'function') { initialsystem(); return; }
+      throw new Error('V120_runInitial_ / initialsystem ط؛ظٹط± ظ…ظˆط¬ظˆط¯ط© â€” طھط£ظƒط¯ ظ…ظ† InitCompat.gs ظˆ InitialSystem.gs');
+    });
+
+    // 4) ط²ط±ط¹ ط§ظ„طµظٹط؛ (ظٹط¹طھظ…ط¯ ط¹ظ„ظ‰ ظˆط¬ظˆط¯ test_10_seed_formulas ط£ظˆ V120_seedFormulas_)
+    step_(runId, 'ط²ط±ط¹ ط§ظ„طµظٹط؛', function () {
+      if (typeof test_10_seed_formulas === 'function') {
+        test_10_seed_formulas();
+        return;
+      }
+      if (typeof V120_seedFormulas_ === 'function') {
+        V120_seedFormulas_();
+        return;
+      }
+      throw new Error('ظ„ط§ طھظˆط¬ط¯ ط¯ط§ظ„ط© ط²ط±ط¹ طµظٹط؛: test_10_seed_formulas ط£ظˆ V120_seedFormulas_');
+    });
+
+    // 5) Reset Ledgers (ط§ط®طھظٹط§ط±ظٹ)
+    if (opt.resetLedgers) {
+      step_(runId, 'Reset Ledgers', function () {
+        if (typeof resetLedgers_KeepHeaders !== 'function') throw new Error('resetLedgers_KeepHeaders ط؛ظٹط± ظ…ظˆط¬ظˆط¯ط©');
+        resetLedgers_KeepHeaders();
+      });
+    }
+
+    // 6) Seed Classifier (ط§ط®طھظٹط§ط±ظٹ)
+    if (opt.seedClassifier) {
+      step_(runId, 'Seed Classifier (AR)', function () {
+        if (typeof seedClassifierMap_AR !== 'function') throw new Error('seedClassifierMap_AR ط؛ظٹط± ظ…ظˆط¬ظˆط¯ط©');
+        seedClassifierMap_AR();
+      });
+    }
+
+    // 7) Probe Webhook (ط§ط®طھظٹط§ط±ظٹ)
+    if (opt.probeWebhook) {
+      step_(runId, 'Probe Webhook (GET/POST)', function () {
+        if (typeof test_01_probeWebhook !== 'function') throw new Error('test_01_probeWebhook ط؛ظٹط± ظ…ظˆط¬ظˆط¯ط©');
+        test_01_probeWebhook();
+      });
+    }
+
+    // 8) AI Diagnostics (ط§ط®طھظٹط§ط±ظٹ)
+    if (opt.runAI) {
+      step_(runId, 'AI Diagnostics', function () {
+        if (typeof test_AI_Diagnostics !== 'function') throw new Error('test_AI_Diagnostics ط؛ظٹط± ظ…ظˆط¬ظˆط¯ط©');
+        test_AI_Diagnostics();
+      });
+    }
+
+    // 9) ط¥ط¹ط§ط¯ط© ط§ط­طھط³ط§ط¨ Budgets ظ…ظ† Sheet1
+    step_(runId, 'ط¥ط¹ط§ط¯ط© ط§ط­طھط³ط§ط¨ ط§ظ„ظ…ظٹط²ط§ظ†ظٹط© ظ…ظ† Sheet1', function () {
+      if (typeof test_05_recompute_budgets_from_sheet1 !== 'function') throw new Error('test_05_recompute_budgets_from_sheet1 ط؛ظٹط± ظ…ظˆط¬ظˆط¯ط©');
+      test_05_recompute_budgets_from_sheet1();
+    });
+
+    // 10) ط¥ط¹ط§ط¯ط© ط¨ظ†ط§ط، Dashboard (ط§ط®طھظٹط§ط±ظٹ)
+    if (opt.rebuildDash) {
+      step_(runId, 'ط¥ط¹ط§ط¯ط© ط¨ظ†ط§ط، Dashboard', function () {
+        if (typeof rebuildDashboard !== 'function') throw new Error('rebuildDashboard ط؛ظٹط± ظ…ظˆط¬ظˆط¯ط©');
+        rebuildDashboard();
+      });
+    }
+
+    // 11) Telegram Ping ط¥ظ„ظ‰ HUB
+    step_(runId, 'Telegram Ping', function () {
+      var hub = (typeof getHubChatId_ === 'function') ? getHubChatId_() : (ENV.CHAT_ID || '');
+      if (!hub) throw new Error('ظ„ط§ ظٹظˆط¬ط¯ HUB/CHAT_ID ظ„ظ„ط¥ط±ط³ط§ظ„');
+      if (typeof sendTelegram_ !== 'function') throw new Error('sendTelegram_ ط؛ظٹط± ظ…ظˆط¬ظˆط¯ط©');
+      sendTelegram_(hub, 'âœ… V120 MasterRun OK\nRunId: ' + runId + '\nط§ظ„ظˆظ‚طھ: ' + started.toLocaleString());
+    });
+
+    // 12) ط¥ظ„ط؛ط§ط، ظˆط¶ط¹ ط§ظ„طµظٹط§ظ†ط©
+    if (opt.maintenanceDuringRun) {
+      step_(runId, 'ط¥ظ„ط؛ط§ط، ظˆط¶ط¹ ط§ظ„طµظٹط§ظ†ط©', function () {
+        setMaintenanceMode_('off');
+      });
+    }
+
+    runLog_(runId, 'ط§ظ†طھظ‡ط§ط، ط§ظ„طھط´ط؛ظٹظ„ ط§ظ„ط´ط§ظ…ظ„', 'OK', { durationSec: Math.round((new Date() - started) / 1000) });
+
+  } catch (e) {
+    runLog_(runId, 'ظپط´ظ„ ط§ظ„طھط´ط؛ظٹظ„ ط§ظ„ط´ط§ظ…ظ„', 'ERROR', { error: String(e) });
+    throw e;
+  } finally {
+    // ط¶ظ…ط§ظ† ط¥ظ„ط؛ط§ط، ط§ظ„طµظٹط§ظ†ط© ط­طھظ‰ ظ„ظˆ ظپط´ظ„ ط§ظ„طھط´ط؛ظٹظ„
+    try { setMaintenanceMode_('off'); } catch (_) {}
+    lock.releaseLock();
+  }
+}
+
+function setMaintenanceMode_(mode) {
+  mode = String(mode || '').toLowerCase();
+  PropertiesService.getScriptProperties().setProperty('MAINTENANCE_MODE', mode === 'on' ? 'on' : 'off');
+}
+
+function step_(runId, name, fn) {
+  var t0 = new Date();
+  runLog_(runId, name, 'RUN', {});
+  try {
+    fn();
+    runLog_(runId, name, 'OK', { ms: (new Date() - t0) });
+  } catch (e) {
+    runLog_(runId, name, 'FAIL', { ms: (new Date() - t0), error: String(e) });
+    throw e;
+  }
+}
+
+function ensureRunLogSheet_() {
+  var sh = _sheet('Run_Log');
+  if (sh.getLastRow() === 0) {
+    sh.appendRow(['ط§ظ„ظˆظ‚طھ', 'RunId', 'ط§ظ„ظ…ط±ط­ظ„ط©', 'ط§ظ„ط­ط§ظ„ط©', 'طھظپط§طµظٹظ„']);
+    sh.setFrozenRows(1);
+    sh.setRightToLeft(true);
+    sh.getRange('A:A').setNumberFormat('yyyy-MM-dd HH:mm:ss');
+  }
+}
+
+function clearRunLog_() {
+  var sh = _sheet('Run_Log');
+  if (sh.getLastRow() > 1) {
+    sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).clearContent();
+  }
+}
+
+function runLog_(runId, stage, status, details) {
+  var sh = _sheet('Run_Log');
+  var s = '';
+  try { s = JSON.stringify(details || {}); } catch (e) { s = String(details || ''); }
+  sh.appendRow([new Date(), String(runId), String(stage), String(status), s.slice(0, 1500)]);
+}
+
+
+/********** InitCompat.gs â€” طھظˆط§ظپظ‚ ط¢ظ…ظ† ط¨ط¯ظˆظ† Recursion **********/
+
+/**
+ * ط¯ط§ظ„ط© ظ…ظˆط­ط¯ط© ظ„ظ„طھظ‡ظٹط¦ط© â€” طھط³طھط¯ط¹ظٹ "ط§ظ„طھظ†ظپظٹط° ط§ظ„ط­ظ‚ظٹظ‚ظٹ" ظپظ‚ط·
+ * ظˆظ„ط§ طھط³طھط¯ط¹ظٹ initialSystemSetup (ظ„ظ…ظ†ط¹ ط§ظ„ط­ظ„ظ‚ط§طھ).
+ */
+function V120_runInitial_() {
+  if (typeof V120_initialSystemSetupImpl_ === 'function') {
+    return V120_initialSystemSetupImpl_();
+  }
+  // fallback ط¥ظ† ظƒط§ظ†طھ ظ„ط¯ظٹظƒ ظ†ط³ط®ط© ظ‚ط¯ظٹظ…ط© ظپظٹ ظ…ظ„ظپ ط¢ط®ط±
+  if (typeof initialSystemSetup_ === 'function') return initialSystemSetup_();
+  if (typeof initialSystemSetupV120 === 'function') return initialSystemSetupV120();
+
+  throw new Error('ظ„ظ… ظٹطھظ… ط§ظ„ط¹ط«ظˆط± ط¹ظ„ظ‰ ط¯ط§ظ„ط© طھظ‡ظٹط¦ط© طھظ†ظپظٹط°ظٹط©: V120_initialSystemSetupImpl_');
+}
+
+/**
+ * ظ‡ط°ط§ ط§ظ„ط§ط³ظ… ظ…ط·ظ„ظˆط¨ ظ„ظ„ظ‚ط§ط¦ظ…ط©/ط§ظ„طھظˆط§ظپظ‚
+ */
+function initialsystem() {
+  return V120_runInitial_();
+}
+
+
+/********** Control.gs â€” Maintenance + Stop Webhook **********/
+
+function V120_Maintenance_ON() {
+  PropertiesService.getScriptProperties().setProperty('MAINTENANCE_MODE', 'on');
+  safeNotify('âœ… طھظ… طھظپط¹ظٹظ„ ظˆط¶ط¹ ط§ظ„طµظٹط§ظ†ط© (MAINTENANCE_MODE=on).');
+}
+
+function V120_Maintenance_OFF() {
+  PropertiesService.getScriptProperties().setProperty('MAINTENANCE_MODE', 'off');
+  safeNotify('âœ… طھظ… ط¥ظ„ط؛ط§ط، ظˆط¶ط¹ ط§ظ„طµظٹط§ظ†ط© (MAINTENANCE_MODE=off).');
+}
+
+/**
+ * ط¥ظٹظ‚ط§ظپ Webhook ظپظٹ طھظٹظ„ظٹط¬ط±ط§ظ… + طھطµظپظٹط± ط§ظ„طھط­ط¯ظٹط«ط§طھ ط§ظ„ظ…ط¹ظ„ظ‚ط©
+ * ظ…ظپظٹط¯ ط¥ط°ط§ طھط±ظٹط¯ "طھط¬ظ…ظٹط¯" ط§ظ„ط¨ظˆطھ ظ…ط¤ظ‚طھظ‹ط§ ط£ط«ظ†ط§ط، طھط¹ط¯ظٹظ„ ظƒط¨ظٹط±.
+ */
+function V120_StopTelegramWebhook_NOW() {
+  var token = PropertiesService.getScriptProperties().getProperty('TELEGRAM_TOKEN');
+  if (!token) throw new Error('TELEGRAM_TOKEN ط؛ظٹط± ظ…ظˆط¬ظˆط¯');
+
+  var resp = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/deleteWebhook', {
+    method: 'post',
+    payload: { drop_pending_updates: true },
+    muteHttpExceptions: true
+  });
+
+  safeNotify('deleteWebhook: ' + resp.getResponseCode() + '\n' + resp.getContentText());
+}
+
+
+/********** TestReset.gs â€” Reset ط´ط§ظ…ظ„ ظ„ظ„ط§ط®طھط¨ط§ط± **********/
+
+function V120_TestReset_FULL_WipeSheet1() {
+  V120_TestReset_({ wipeSheet1: true, wipeRunLog: true, wipeIngressDebug: true });
+}
+
+function V120_TestReset_LIGHT_KeepSheet1() {
+  V120_TestReset_({ wipeSheet1: false, wipeRunLog: false, wipeIngressDebug: true });
+}
+
+function V120_TestReset_(opt) {
+  opt = opt || {};
+  var ss = _ss();
+
+  // 1) Sheet1
+  var s1 = _sheet('Sheet1');
+  if (opt.wipeSheet1 && s1.getLastRow() > 1) {
+    s1.getRange(2, 1, s1.getLastRow() - 1, s1.getLastColumn()).clearContent();
+  }
+
+  // 2) Budgets: طµظپظ‘ط± ط§ظ„ظ…طµط±ظˆظپ ظپظ‚ط·
+  var sB = _sheet('Budgets');
+  if (sB.getLastRow() > 1) sB.getRange(2, 3, sB.getLastRow() - 1, 1).setValue(0);
+
+  // 3) Debt_Ledger + Debt_Index
+  var sD = _sheet('Debt_Ledger');
+  if (sD.getLastRow() > 1) sD.getRange(2, 1, sD.getLastRow() - 1, sD.getLastColumn()).clearContent();
+
+  var sIdx = _sheet('Debt_Index');
+  if (sIdx.getLastRow() > 1) sIdx.getRange(2, 1, sIdx.getLastRow() - 1, sIdx.getLastColumn()).clearContent();
+
+  // 4) Dashboard: ظ…ط³ط­ ظƒط§ظ…ظ„ + ط¥ط²ط§ظ„ط© ط§ظ„ط±ط³ظˆظ…
+  var sDash = _sheet('Dashboard');
+  sDash.clear();
+  var charts = sDash.getCharts();
+  for (var i = 0; i < charts.length; i++) sDash.removeChart(charts[i]);
+
+  // 5) Run_Log (ط§ط®طھظٹط§ط±ظٹ)
+  if (opt.wipeRunLog) {
+    var sRun = _sheet('Run_Log');
+    if (sRun.getLastRow() > 1) sRun.getRange(2, 1, sRun.getLastRow() - 1, sRun.getLastColumn()).clearContent();
+  }
+
+  // 6) Ingress_Debug (ط§ط®طھظٹط§ط±ظٹ)
+  if (opt.wipeIngressDebug) {
+    var sDbg = _sheet('Ingress_Debug');
+    if (sDbg.getLastRow() > 1) sDbg.getRange(2, 1, sDbg.getLastRow() - 1, sDbg.getLastColumn()).clearContent();
+  }
+
+  SpreadsheetApp.flush();
+  safeNotify('âœ… TestReset: ط§ظƒطھظ…ظ„ (wipeSheet1=' + !!opt.wipeSheet1 + ')');
+}
+
+
+/********** InitialSystem.gs â€” ط§ظ„طھظ‡ظٹط¦ط© ط§ظ„طھظ†ظپظٹط°ظٹط© ط§ظ„ط­ظ‚ظٹظ‚ظٹط© **********/
+
+function V120_initialSystemSetupImpl_() {
+  var ss = _ss();
+
+  // Sheet1
+  var s1 = _sheet('Sheet1');
+  var h1 = ['ط§ظ„طھط§ط±ظٹط®','ط§ظ„ظ…طµط¯ط±','ط§ظ„ظپطھط±ط©ظ،','ط§ظ„ظپطھط±ط©ظ¢','ط§ظ„ظ‚ظ†ط§ط©/ط§ظ„ظ…طµط¯ط±','ط±ظ‚ظ… ط§ظ„ط­ط³ط§ط¨','ط±ظ‚ظ… ط§ظ„ط¨ط·ط§ظ‚ط©/ط§ظ„ط·ط±ظپ','ط§ظ„ظ…ط¨ظ„ط؛','ط§ظ„ط¬ظ‡ط©/ط§ظ„طھط§ط¬ط±','ط§ظ„طھطµظ†ظٹظپ','ط§ظ„ظ†ظˆط¹','ط§ظ„ظ†طµ ط§ظ„ط®ط§ظ…'];
+  if (s1.getLastRow() === 0) s1.appendRow(h1);
+  else s1.getRange(1, 1, 1, h1.length).setValues([h1]);
+  s1.setFrozenRows(1);
+  s1.setRightToLeft(true);
+  s1.getRange('A:A').setNumberFormat('yyyy-MM-dd HH:mm');
+  s1.getRange('H:H').setNumberFormat('#,##0.00');
+
+  // Budgets
+  var sB = _sheet('Budgets');
+  var hB = ['ط§ظ„طھطµظ†ظٹظپ','ط§ظ„ظ…ظˆط§ط²ظ†ط©','ط§ظ„ظ…طµط±ظˆظپ','ط§ظ„ظ…طھط¨ظ‚ظٹ'];
+  if (sB.getLastRow() === 0) sB.appendRow(hB);
+  else sB.getRange(1, 1, 1, hB.length).setValues([hB]);
+  sB.setFrozenRows(1);
+  sB.setRightToLeft(true);
+  var lastB = Math.max(2, sB.getLastRow());
+  if (lastB >= 2) {
+    sB.getRange(2, 2, lastB - 1, 3).setNumberFormat('#,##0.00');
+    sB.getRange(2, 4, lastB - 1, 1).setFormulaR1C1('=RC[-2]-RC[-1]');
+  }
+  try { ss.setNamedRange('BudgetCategories', sB.getRange('A2:A')); } catch (e) {}
+
+  // Debt_Ledger
+  var sD = _sheet('Debt_Ledger');
+  var hD = ['ط§ظ„طھط§ط±ظٹط®','ط§ظ„ط·ط±ظپ','ظ…ط¯ظٹظ†','ط¯ط§ط¦ظ†','ط§ظ„ط±طµظٹط¯','ظˆطµظپ'];
+  if (sD.getLastRow() === 0) sD.appendRow(hD);
+  else sD.getRange(1, 1, 1, hD.length).setValues([hD]);
+  sD.setFrozenRows(1);
+  sD.setRightToLeft(true);
+  sD.getRange('A:A').setNumberFormat('yyyy-MM-dd HH:mm');
+  sD.getRange('C:E').setNumberFormat('#,##0.00');
+  if (sD.getLastRow() >= 2) {
+    sD.getRange(2, 5).setFormula('=D2-C2');
+    if (sD.getLastRow() > 2) {
+      sD.getRange(3, 5, sD.getLastRow() - 2, 1).setFormulaR1C1('=R[-1]C+RC[-1]-RC[-2]');
+    }
+  }
+
+  // Dashboard
+  var sDash = _sheet('Dashboard');
+  sDash.setRightToLeft(true);
+
+  // Debt_Index
+  var sIdx = _sheet('Debt_Index');
+  var hIdx = ['ط§ظ„ط·ط±ظپ','ط§ظ„ط­ط³ط§ط¨/ط§ظ„ط·ط±ظپ','طµط§ظپظچ ظ…ظڈط³طھط­ظ‚ ظ„ظ†ط§ (+) / ط¹ظ„ظٹظ†ط§ (-)','ط¢ط®ط± طھط­ط¯ظٹط«'];
+  if (sIdx.getLastRow() === 0) sIdx.appendRow(hIdx);
+  else sIdx.getRange(1, 1, 1, hIdx.length).setValues([hIdx]);
+  sIdx.setFrozenRows(1);
+  sIdx.setRightToLeft(true);
+  sIdx.getRange('C:C').setNumberFormat('#,##0.00');
+  sIdx.getRange('D:D').setNumberFormat('yyyy-MM-dd HH:mm');
+
+  // Classifier_Map
+  var sMap = _sheet('Classifier_Map');
+  var hM = ['ظƒظ„ظ…ط© ظ…ظپطھط§ط­ظٹط©','ط§ظ„طھطµظ†ظٹظپ','ط§ظ„ظ†ظˆط¹','isIncoming','accNum','cardNum'];
+  if (sMap.getLastRow() === 0) sMap.appendRow(hM);
+  else sMap.getRange(1, 1, 1, hM.length).setValues([hM]);
+  sMap.setRightToLeft(true);
+
+  // Validation ط¹ظ„ظ‰ ط¹ظ…ظˆط¯ ط§ظ„طھطµظ†ظٹظپ ظپظٹ Sheet1 (J)
+  try {
+    var rule = SpreadsheetApp.newDataValidation()
+      .requireFormulaSatisfied('=COUNTIF(BudgetCategories,INDIRECT("RC",FALSE))>0')
+      .setAllowInvalid(true)
+      .build();
+    s1.getRange('J2:J').setDataValidation(rule);
+  } catch (e2) {}
+
+  // RTL ظ„ظƒظ„ ط§ظ„ط£ظˆط±ط§ظ‚
+  try { ss.getSheets().forEach(function (sh) { sh.setRightToLeft(true); }); } catch (e3) {}
+
+  safeNotify('âœ… initialsystem: طھظ… ط¥ط¹ط¯ط§ط¯ ط§ظ„ط£ظˆط±ط§ظ‚ ظˆط§ظ„طµظٹط؛ ظˆط§ظ„طھظ†ط³ظٹظ‚ط§طھ ظˆRTL.');
+}
+
+
+/********** SeedFormulas.gs â€” طھظˆظپظٹط± test_10_seed_formulas + V120_seedFormulas_ **********/
+
+function V120_seedFormulas_() {
+  // Budgets: ط§ظ„ظ…طھط¨ظ‚ظٹ = ط§ظ„ظ…ظˆط§ط²ظ†ط© - ط§ظ„ظ…طµط±ظˆظپ
+  var sB = _sheet('Budgets');
+  if (sB.getLastRow() >= 2) {
+    sB.getRange(2, 4, sB.getLastRow() - 1, 1).setFormulaR1C1('=RC[-2]-RC[-1]');
+  }
+
+  // Debt_Ledger: ط§ظ„ط±طµظٹط¯ = ط§ظ„ط³ط§ط¨ظ‚ + (ط¯ط§ط¦ظ† - ظ…ط¯ظٹظ†)
+  var sD = _sheet('Debt_Ledger');
+  if (sD.getLastRow() >= 2) {
+    sD.getRange(2, 5).setFormula('=D2-C2');
+    if (sD.getLastRow() > 2) {
+      sD.getRange(3, 5, sD.getLastRow() - 2, 1).setFormulaR1C1('=R[-1]C+RC[-1]-RC[-2]');
+    }
+  }
+
+  safeNotify('âœ… Seed formulas: طھظ… ط²ط±ط¹/ط¥طµظ„ط§ط­ طµظٹط؛ Budgets ظˆDebt_Ledger.');
+}
+
+/**
+ * ط§ط³ظ… ط§ظ„ط§ط®طھط¨ط§ط± ط§ظ„ظ‚ط¯ظٹظ… ط§ظ„ط°ظٹ ظٹط¨ط­ط« ط¹ظ†ظ‡ MasterRun ط£ط­ظٹط§ظ†ظ‹ط§
+ * ظ†ط¬ط¹ظ„ظ‡ Wrapper ط¹ظ„ظ‰ ط§ظ„ط¯ط§ظ„ط© ط§ظ„ط«ط§ط¨طھط©
+ */
+function test_10_seed_formulas() {
+  V120_seedFormulas_();
+}
+
+
+/********** ProbeWebhook.gs â€” طھظˆظپظٹط± test_01_probeWebhook + V120_probeWebhook_ **********/
+
+function V120_probeWebhook_() {
+  var url = ENV.WEBAPP_URL_DIRECT || ENV.WEBAPP_URL;
+  if (!url) throw new Error('ط¶ط¹ WEBAPP_URL_DIRECT ط£ظˆ WEBAPP_URL ظپظٹ Script Properties.');
+
+  var secret = ENV.INGRESS_SECRET || '';
+  var getUrl = url + '?sms=' + encodeURIComponent('Hello') + '&secret=' + encodeURIComponent(secret);
+
+  // GET
+  var respGet = UrlFetchApp.fetch(getUrl, {
+    muteHttpExceptions: true,
+    followRedirects: true
+  });
+
+  // POST (ظ†طµ ط®ط§ظ…)
+  var postUrl = url + '?secret=' + encodeURIComponent(secret);
+  var respPost = UrlFetchApp.fetch(postUrl, {
+    method: 'post',
+    headers: { 'X-INGRESS-SECRET': String(secret) },
+    payload: 'ط­ظˆط§ظ„ط© ظˆط§ط±ط¯ط© ط¨ظ€ 2000 SAR ظ…ظ† ظ…ط­ظ…ط¯ ط§ظ„ط­ط±ط¨ظٹ ط¥ظ„ظ‰ ط­ط³ط§ط¨ 8001',
+    muteHttpExceptions: true,
+    followRedirects: true
+  });
+
+  var msg = 'Probe Webhook\n' +
+    'GET=' + respGet.getResponseCode() + '\n' +
+    'POST=' + respPost.getResponseCode() + '\n' +
+    'â€”\n' +
+    'GET body: ' + String(respGet.getContentText() || '').slice(0, 200) + '\n' +
+    'POST body: ' + String(respPost.getContentText() || '').slice(0, 200);
+
+  // ط³ط¬ظ„ ط³ط±ظٹط¹ ظپظٹ Run_Log ط¥ظ† ظˆط¬ط¯
+  try {
+    _sheet('Run_Log').appendRow([new Date(), '-', 'Probe Webhook (manual)', 'INFO', msg]);
+  } catch (_) {}
+
+  // طھظ†ط¨ظٹظ‡ ظ„ظ„ظ…ط³طھط®ط¯ظ…
+  safeNotify(msg);
+}
+
+function test_01_probeWebhook() {
+  V120_probeWebhook_();
+}
+
+
+/********** AIDiagnostics.gs â€” طھظˆظپظٹط± test_AI_Diagnostics + V120_AI_Diagnostics_ **********/
+
+function V120_AI_Diagnostics_() {
+  // ط¹ظٹظ†ط§طھ ظ‚ظٹط§ط³ظٹط©
+  var samples = [
+    'ط­ظˆط§ظ„ط© ظˆط§ط±ط¯ط© ط¨ظ€ 2000 SAR ظ…ظ† ظ…ط­ظ…ط¯ ط§ظ„ط­ط±ط¨ظٹ ط¥ظ„ظ‰ ط­ط³ط§ط¨ 8001',
+    'ط´ط±ط§ط، 120 SAR ط¹ط¨ط± STC Pay ظپظٹ ظ…طھط¬ط± طھط¬ط±ظٹط¨ظٹ',
+    'ط³ط­ط¨ ATM ط¨ظ…ط¨ظ„ط؛ 400 SAR ظ…ظ† ط¨ط·ط§ظ‚ط© 4912'
+  ];
+
+  // ط§ظ„طھط£ظƒط¯ ظ…ظ† طھظˆظپط± ط¯ظˆط§ظ„ ط§ظ„طھط­ظ„ظٹظ„ ط§ظ„ط£ط³ط§ط³ظٹط©
+  var hasProbe = (typeof callAiProbe_ === 'function');
+  var hasHybrid = (typeof callAiHybridV120 === 'function');
+  var hasClassifier = (typeof applyClassifierMap_ === 'function');
+
+  if (!hasProbe && !hasHybrid) {
+    throw new Error('ظ„ط§ طھظˆط¬ط¯ ط¯ط§ظ„ط© AI: callAiProbe_ ط£ظˆ callAiHybridV120 â€” طھط£ظƒط¯ ظ…ظ† AI.gs');
+  }
+  if (!hasClassifier) {
+    throw new Error('applyClassifierMap_ ط؛ظٹط± ظ…ظˆط¬ظˆط¯ط© â€” طھط£ظƒط¯ ظ…ظ† Classifier.gs');
+  }
+
+  var lines = [];
+  var s1 = _sheet('Sheet1');
+
+  for (var i = 0; i < samples.length; i++) {
+    var text = samples[i];
+
+    // 1) ط§ط³طھط¯ط¹ط§ط، AI (ظ…ط¹ طھط­ط¯ظٹط¯ ط§ظ„ظ…ط­ط±ظƒ ط¥ظ† طھظˆظپظ‘ط± callAiProbe_)
+    var out;
+    if (hasProbe) {
+      out = callAiProbe_(text);  // ظٹط±ط¬ط¹ {ai, engine}
+    } else {
+      out = { ai: callAiHybridV120(text), engine: 'hybrid' };
+    }
+
+    // 2) طھط·ط¨ظٹظ‚ ط°ط§ظƒط±ط© ط§ظ„طھطµظ†ظٹظپ
+    var ai2 = applyClassifierMap_(text, out.ai);
+
+    // 3) طھط³ط¬ظٹظ„ ظپظٹ Sheet1 ظƒط³ط·ط± طھط´ط®ظٹطµ
+    s1.appendRow([
+      new Date(),
+      'AI_DIAG',
+      '-',
+      '-',
+      'ط§ط®طھط¨ط§ط±_AI',
+      '',
+      '',
+      Number(ai2.amount || 0),
+      ai2.merchant || '',
+      ai2.category || '',
+      ai2.type || '',
+      text
+    ]);
+
+    // 4) طھظ„ط®ظٹطµ
+    lines.push('â€¢ ' + String(out.engine || '').toUpperCase() + ' â†’ ' +
+      (ai2.type || '-') + ' | ' + (ai2.category || '-') + ' | ' +
+      Number(ai2.amount || 0).toFixed(2) + ' SAR');
+  }
+
+  // ط¥ط±ط³ط§ظ„ ظ…ظ„ط®طµ ط¥ظ„ظ‰ طھظٹظ„ظٹط¬ط±ط§ظ… (HUB)
+  var hub = (typeof getHubChatId_ === 'function') ? getHubChatId_() : (ENV.CHAT_ID || '');
+  if (hub && typeof sendTelegram_ === 'function') {
+    sendTelegram_(hub, 'ًں¤– ظ†طھظٹط¬ط© ط§ط®طھط¨ط§ط± ط§ظ„ط°ظƒط§ط، ط§ظ„ط§طµط·ظ†ط§ط¹ظٹ:\n' + lines.join('\n'));
+  }
+
+  safeNotify('âœ… طھظ… ط§ط®طھط¨ط§ط± AI. ط§ظ†ط¸ط± Sheet1 ظˆط±ط³ط§ظ„ط© طھظٹظ„ظٹط¬ط±ط§ظ….');
+}
+
+function test_AI_Diagnostics() {
+  V120_AI_Diagnostics_();
+}
+``
+
+
+/********** Webhook.gs â€” setWebhook_DIRECT_no302 **********/
+
+function setWebhook_DIRECT_no302() {
+  var base = ENV.WEBAPP_URL_DIRECT || ENV.WEBAPP_URL || '';
+  if (!base) throw new Error('ط¶ط¹ WEBAPP_URL_DIRECT ط£ظˆ WEBAPP_URL ظپظٹ Script Properties.');
+
+  // ظ†ط¶ظٹظپ secret ظپظٹ ط§ظ„ط±ط§ط¨ط· (ط§ظ„ط£ظƒط«ط± ط«ط¨ط§طھظ‹ط§ ظپظٹ GAS)
+  var url = base + '?secret=' + encodeURIComponent(ENV.INGRESS_SECRET || '');
+
+  // deleteWebhook ط«ظ… setWebhook
+  UrlFetchApp.fetch('https://api.telegram.org/bot' + ENV.TELEGRAM_TOKEN + '/deleteWebhook', {
+    method: 'post',
+    payload: { drop_pending_updates: true },
+    muteHttpExceptions: true
+  });
+
+  var resp = UrlFetchApp.fetch('https://api.telegram.org/bot' + ENV.TELEGRAM_TOKEN + '/setWebhook', {
+    method: 'post',
+    payload: {
+      url: url,
+      allowed_updates: JSON.stringify(['message', 'channel_post', 'callback_query']),
+      max_connections: 40,
+      drop_pending_updates: true,
+      // secret_token ط§ط®طھظٹط§ط±ظٹ (ظ‚ط¯ ظ„ط§ ظٹط¸ظ‡ط± ظپظٹ e.headers ط¯ط§ط¦ظ…ظ‹ط§ ط¯ط§ط®ظ„ GAS)
+      secret_token: (ENV.TG_SECRET_TOKEN || '')
+    },
+    muteHttpExceptions: true
+  });
+
+  var info = UrlFetchApp.fetch('https://api.telegram.org/bot' + ENV.TELEGRAM_TOKEN + '/getWebhookInfo', {
+    muteHttpExceptions: true
+  });
+
+  safeNotify('setWebhook(DIRECT): ' + resp.getContentText() + '\ninfo: ' + info.getContentText());
+}

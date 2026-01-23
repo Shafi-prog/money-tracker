@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>الإعدادات - MoneyTracker</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="bg-gray-50" x-data="settingsPage()" x-init="init()">
+  
+  <!-- Header -->
+  <div class="bg-gray-800 text-white shadow-lg">
+    <div class="container mx-auto px-4 py-6">
+      <h1 class="text-3xl font-bold">⚙️ الإعدادات</h1>
+      <p class="text-gray-300 mt-2">إدارة إعدادات النظام والتفضيلات</p>
+    </div>
+  </div>
+
+  <div class="container mx-auto px-4 py-8">
+
+    <!-- Success Message (Professional Pattern from Firefly III) -->
+    <div 
+      x-show="notifications.success.show" 
+      x-transition
+      class="bg-green-50 border-l-4 border-green-500 rounded-lg p-4 mb-6 shadow-md"
+    >
+      <div class="flex items-center gap-3">
+        <div class="text-2xl">✅</div>
+        <div>
+          <h3 class="font-bold text-green-800">تم الحفظ بنجاح!</h3>
+          <p class="text-green-700" x-text="notifications.success.text"></p>
+        </div>
+        <button @click="notifications.success.show = false" class="mr-auto text-green-600 hover:text-green-800">
+          ✕
+        </button>
+      </div>
+    </div>
+
+    <!-- Error Message -->
+    <div 
+      x-show="notifications.error.show" 
+      x-transition
+      class="bg-red-50 border-l-4 border-red-500 rounded-lg p-4 mb-6 shadow-md"
+    >
+      <div class="flex items-center gap-3">
+        <div class="text-2xl">❌</div>
+        <div>
+          <h3 class="font-bold text-red-800">خطأ في الحفظ</h3>
+          <p class="text-red-700" x-text="notifications.error.text"></p>
+        </div>
+        <button @click="notifications.error.show = false" class="mr-auto text-red-600 hover:text-red-800">
+          ✕
+        </button>
+      </div>
+    </div>
+
+    <!-- Loading Overlay (Fixes "جاري لتحميل" stuck issue) -->
+    <div 
+      x-show="formStates.isSubmitting" 
+      x-transition
+      class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+    >
+      <div class="bg-white rounded-xl p-8 shadow-2xl text-center">
+        <div class="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600 mx-auto mb-4"></div>
+        <p class="text-xl font-semibold text-gray-700">جاري الحفظ...</p>
+        <p class="text-gray-500 mt-2">الرجاء الانتظار</p>
+      </div>
+    </div>
+
+    <!-- Settings Form -->
+    <form @submit.prevent="saveSettings()">
+      <div class="grid md:grid-cols-2 gap-6">
+        
+        <!-- User Profile Card -->
+        <div class="bg-white rounded-xl shadow-lg p-6">
+          <h2 class="text-2xl font-bold mb-6 flex items-center gap-2">
+            <span>👤</span>
+            <span>الملف الشخصي</span>
+          </h2>
+          
+          <div class="space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">الاسم</label>
+              <input 
+                type="text" 
+                x-model="settings.user_name"
+                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="أدخل اسمك"
+              >
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">البريد الإلكتروني</label>
+              <input 
+                type="email" 
+                x-model="settings.user_email"
+                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="example@gmail.com"
+                dir="ltr"
+              >
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">العملة الافتراضية</label>
+              <select 
+                x-model="settings.default_currency"
+                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="USD">🇺🇸 USD - دولار أمريكي</option>
+                <option value="SAR">🇸🇦 SAR - ريال سعودي</option>
+                <option value="AED">🇦🇪 AED - درهم إماراتي</option>
+                <option value="EGP">🇪🇬 EGP - جنيه مصري</option>
+                <option value="EUR">🇪🇺 EUR - يورو</option>
+                <option value="GBP">🇬🇧 GBP - جنيه إسترليني</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">اللغة</label>
+              <select 
+                x-model="settings.language"
+                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="ar">🇸🇦 العربية</option>
+                <option value="en">🇺🇸 English</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Preferences Card -->
+        <div class="bg-white rounded-xl shadow-lg p-6">
+          <h2 class="text-2xl font-bold mb-6 flex items-center gap-2">
+            <span>🎯</span>
+            <span>التفضيلات</span>
+          </h2>
+          
+          <div class="space-y-4">
+            <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+              <div>
+                <h3 class="font-medium">يوم الراتب</h3>
+                <p class="text-sm text-gray-600">اليوم من الشهر</p>
+              </div>
+              <input 
+                type="number" 
+                x-model="settings.salary_day"
+                min="1"
+                max="31"
+                class="w-20 px-3 py-2 border border-gray-300 rounded-lg text-center"
+              >
+            </div>
+
+            <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+              <div>
+                <h3 class="font-medium">التنبيهات</h3>
+                <p class="text-sm text-gray-600">إشعارات الميزانية</p>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" x-model="settings.enable_notifications" class="sr-only peer">
+                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
+            </div>
+
+            <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+              <div>
+                <h3 class="font-medium">تطبيق القواعد تلقائياً</h3>
+                <p class="text-sm text-gray-600">تصنيف تلقائي</p>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" x-model="settings.auto_apply_rules" class="sr-only peer">
+                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Save Button (Professional Pattern) -->
+      <div class="mt-6 flex gap-4">
+        <button 
+          type="submit"
+          :disabled="formStates.isSubmitting"
+          class="px-8 py-4 bg-green-600 text-white rounded-lg font-bold hover:bg-green-700 transition shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+        >
+          <span x-show="!formStates.isSubmitting">💾</span>
+          <span x-show="formStates.isSubmitting" class="animate-spin">⏳</span>
+          <span x-text="formStates.isSubmitting ? 'جاري الحفظ...' : 'حفظ الإعدادات'"></span>
+        </button>
+        <a 
+          href="?page=index"
+          class="px-8 py-4 bg-gray-500 text-white rounded-lg font-bold hover:bg-gray-600 transition"
+        >
+          ← العودة للوحة التحكم
+        </a>
+      </div>
+    </form>
+
+    <!-- Quick Links -->
+    <div class="mt-8 bg-white rounded-xl shadow-lg p-6">
+      <h2 class="text-xl font-bold mb-4">🔗 روابط سريعة</h2>
+      <div class="grid md:grid-cols-3 gap-4">
+        <a href="?page=index" class="block p-4 border-2 border-gray-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition">
+          <span class="text-2xl block mb-2">📊</span>
+          <span class="font-medium">لوحة التحكم</span>
+        </a>
+        <a href="?page=features" class="block p-4 border-2 border-gray-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition">
+          <span class="text-2xl block mb-2">✨</span>
+          <span class="font-medium">الميزات</span>
+        </a>
+        <a href="?page=test" class="block p-4 border-2 border-gray-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition">
+          <span class="text-2xl block mb-2">🧪</span>
+          <span class="font-medium">اختبارات</span>
+        </a>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    function settingsPage() {
+      return {
+        settings: {
+          user_name: '',
+          default_currency: 'USD',
+          language: 'ar',
+          salary_day: 1,
+          enable_notifications: true,
+          auto_apply_rules: true
+        },
+
+        notifications: {
+          success: { show: false, text: '' },
+          error: { show: false, text: '' }
+        },
+
+        // Professional pattern: separate loading state
+        formStates: {
+          isSubmitting: false,
+          isLoading: false
+        },
+
+        init() {
+          // CRITICAL FIX: Load async, don't block initialization
+          setTimeout(() => {
+            this.loadSettings();
+          }, 100);
+        },
+
+        loadSettings() {
+          // Don't call if google.script.run doesn't exist (testing)
+          if (typeof google === 'undefined' || !google.script || !google.script.run) {
+            console.log('Running in standalone mode - using defaults');
+            return;
+          }
+          
+          this.formStates.isLoading = true;
+          
+          google.script.run
+            .withSuccessHandler((result) => {
+              this.formStates.isLoading = false;
+              if (result && result.settings) {
+                this.settings = { ...this.settings, ...result.settings };
+              }
+            })
+            .withFailureHandler((error) => {
+              this.formStates.isLoading = false;
+              console.error('Load error:', error);
+              // Don't show error to user - just use defaults
+            })
+            .getSettings();
+        },
+
+        saveSettings() {
+          // CRITICAL FIX: Check if google.script.run exists
+          if (typeof google === 'undefined' || !google.script || !google.script.run) {
+            this.notifications.error.show = true;
+            this.notifications.error.text = 'الرجاء فتح الصفحة من خلال رابط النشر';
+            return;
+          }
+          
+          // CRITICAL FIX: Proper loading state management (Firefly III pattern)
+          this.formStates.isSubmitting = true;
+          this.notifications.success.show = false;
+          this.notifications.error.show = false;
+
+          google.script.run
+            .withSuccessHandler((result) => {
+              // ALWAYS clear loading state first
+              this.formStates.isSubmitting = false;
+              
+              if (result && result.success) {
+                // Show success message
+                this.notifications.success.show = true;
+                this.notifications.success.text = result.message || 'تم حفظ الإعدادات بنجاح!';
+                
+                // Auto-hide after 3 seconds
+                setTimeout(() => {
+                  this.notifications.success.show = false;
+                }, 3000);
+              } else {
+                // Show error
+                this.notifications.error.show = true;
+                this.notifications.error.text = result.error || 'فشل حفظ الإعدادات';
+              }
+            })
+            .withFailureHandler((error) => {
+              // ALWAYS clear loading state on error
+              this.formStates.isSubmitting = false;
+              this.notifications.error.show = true;
+              this.notifications.error.text = 'خطأ: ' + error.message;
+            })
+            .saveSettings(this.settings);
+        }
+      };
+    }
+  </script>
+
+</body>
+</html>

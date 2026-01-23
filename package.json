@@ -1,0 +1,34 @@
+{
+  "name": "moneytracker-v1",
+  "version": "1.0.0",
+  "description": "MoneyTracker V1.0 - Multi-User Financial Management System",
+  "scripts": {
+    "login": "clasp login",
+    "create": "clasp create --type standalone --title \"MoneyTracker V1\" --rootDir ./src",
+    "pull": "clasp pull",
+    "push": "node scripts/test-before-deploy.js",
+    "push-no-test": "clasp push",
+    "watch": "clasp push --watch",
+    "open": "clasp open",
+    "deploy": "clasp deploy",
+    "deployments": "clasp deployments",
+    "version": "clasp version",
+    "versions": "clasp versions",
+    "setup": "npm install && clasp login",
+    "auto-push": "node scripts/auto-push.js",
+    "test": "clasp run AUTO_TEST_ALL_PAGES"
+  },
+  "keywords": [
+    "google-apps-script",
+    "telegram-bot",
+    "financial-management",
+    "automation"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "devDependencies": {
+    "@google/clasp": "^2.4.2",
+    "@types/google-apps-script": "^1.0.83",
+    "chokidar": "^3.5.3"
+  }
+}

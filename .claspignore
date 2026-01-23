@@ -1,0 +1,62 @@
+# Ignore node_modules
+node_modules/**
+**/node_modules/**
+
+# Ignore scripts folder (Node.js scripts)
+scripts/**
+**/scripts/**
+
+# Ignore archived files (deleted/deprecated)
+_archived/**
+**/_archived/**
+
+# Ignore src folder (reference only - duplicates root files)
+src/**
+**/src/**
+
+# Ignore git files
+.git
+.gitignore
+
+# Ignore configuration
+.clasp.json
+package.json
+package-lock.json
+
+# Ignore documentation
+*.md
+!README.md
+
+# Node.js validation scripts (run locally only)
+VALIDATE_FRONTEND.js
+FRONTEND_BACKEND_VALIDATION.js
+
+# Development files
+.vscode/**
+test-*.ps1
+jsconfig.json
+
+# Binary files
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.txt
+
+# Temporary files
+*.tmp
+*.log
+MARKETING.md
+QUICKSTART.md
+
+# Ignore scripts folder
+scripts/**
+scripts/
+
+# Ignore VS Code settings
+.vscode/
+
+# Ignore temp files
+*.tmp
+*.log
+.DS_Store

@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>المحفظة الذكية - لوحة التحكم</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Font: Tajawal -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Custom Config -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Tajawal', 'sans-serif'],
+                    },
+                    colors: {
+                        wafeer: {
+                            50: '#f0fdf4',
+                            100: '#dcfce7',
+                            500: '#22c55e',
+                            600: '#16a34a',
+                            700: '#15803d',
+                            900: '#14532d',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* شريط التمرير المخصص */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+        }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans text-gray-800 antialiased selection:bg-wafeer-100 selection:text-wafeer-900">
+
+    <div class="flex h-screen overflow-hidden">
+        
+        <!-- Sidebar (Desktop) -->
+        <aside class="hidden w-64 flex-col bg-white shadow-xl lg:flex z-20">
+            <div class="flex h-16 items-center justify-center border-b border-gray-100 px-6">
+                <span class="text-2xl font-bold tracking-wider text-wafeer-600">وفير<span class="text-gray-400 text-xs mr-2">PRO</span></span>
+            </div>
+            
+            <nav class="flex-1 space-y-1 overflow-y-auto px-4 py-4">
+                <a href="#" class="flex items-center rounded-lg bg-wafeer-50 px-4 py-3 text-wafeer-700 transition-colors">
+                    <svg class="ml-3 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                    </svg>
+                    لوحة القيادة
+                </a>
+                
+                <a href="#" class="group flex items-center rounded-lg px-4 py-3 text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors">
+                    <svg class="ml-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                    </svg>
+                    المعاملات
+                </a>
+
+                <a href="#" class="group flex items-center rounded-lg px-4 py-3 text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors">
+                    <svg class="ml-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" />
+                    </svg>
+                    التقارير والتحليل
+                </a>
+            </nav>
+
+            <div class="border-t border-gray-100 p-4">
+                <div class="flex items-center gap-3">
+                    <div class="h-10 w-10 flex-shrink-0 lg:h-12 lg:w-12 rounded-full bg-wafeer-100 flex items-center justify-center text-wafeer-700 font-bold">
+                        A
+                    </div>
+                    <div>
+                        <p class="text-sm font-medium text-gray-700">المستخدم الرئيسي</p>
+                        <p class="text-xs text-gray-500">الباقة الاحترافية</p>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 overflow-y-auto bg-gray-50/50">
+            <!-- Mobile Header -->
+            <div class="flex h-16 items-center justify-between bg-white px-4 shadow-sm lg:hidden">
+                <button class="rounded-md p-2 text-gray-500 hover:bg-gray-100">
+                    <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+                    </svg>
+                </button>
+                <span class="text-xl font-bold text-wafeer-600">وفير</span>
+                <div class="w-10"></div> <!-- Spacer -->
+            </div>
+
+            <div class="container mx-auto px-4 py-8 lg:px-8">
+                
+                <!-- Quick Actions & Welcome -->
+                <div class="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-center">
+                    <div>
+                        <h1 class="text-2xl font-bold text-gray-900">مرحباً بك 👋</h1>
+                        <p class="mt-1 text-sm text-gray-500">إليك نظرة عامة على وضعك المالي اليوم.</p>
+                    </div>
+                    <div class="flex gap-3">
+                        <button class="inline-flex items-center justify-center rounded-lg bg-white border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-wafeer-500 focus:ring-offset-2">
+                           <svg class="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                           تحديث
+                        </button>
+                        <button class="inline-flex items-center justify-center rounded-lg bg-wafeer-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-wafeer-700 focus:outline-none focus:ring-2 focus:ring-wafeer-500 focus:ring-offset-2">
+                            <svg class="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
+                            إضافة معاملة
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Cards Grid -->
+                <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4 mb-8">
+                    <!-- Balance -->
+                    <div class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-wafeer-500 to-wafeer-700 p-6 text-white shadow-lg">
+                        <div class="relative z-10">
+                            <p class="mb-1 text-sm font-medium text-wafeer-100">رصيد الحسابات</p>
+                            <h3 class="text-3xl font-bold tracking-tight">24,500 ر.س</h3>
+                            <div class="mt-4 flex items-center text-sm text-wafeer-100">
+                                <span class="flex items-center rounded-full bg-wafeer-400/20 px-2 py-0.5 text-white">
+                                    <svg class="ml-1 h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
+                                    +2.5%
+                                </span>
+                                <span class="mr-2">مقارنة بالشهر الماضي</span>
+                            </div>
+                        </div>
+                        <!-- Background Decoration -->
+                        <div class="absolute -right-6 -top-6 h-32 w-32 rounded-full bg-white/10 blur-2xl"></div>
+                        <div class="absolute -bottom-6 -left-6 h-32 w-32 rounded-full bg-black/10 blur-2xl"></div>
+                    </div>
+
+                    <!-- Income -->
+                    <div class="rounded-2xl bg-white p-6 shadow-sm border border-gray-100">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-sm font-medium text-gray-500">الدخل الشهري</p>
+                                <h3 class="mt-1 text-2xl font-bold text-gray-900">12,450</h3>
+                            </div>
+                            <div class="flex h-12 w-12 items-center justify-center rounded-full bg-green-50 text-green-600">
+                                <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 11l5-5m0 0l5 5m-5-5v12" /></svg>
+                            </div>
+                        </div>
+                        <div class="mt-4 h-1.5 w-full rounded-full bg-gray-100 overflow-hidden">
+                            <div class="h-full rounded-full bg-green-500" style="width: 75%"></div>
+                        </div>
+                    </div>
+
+                    <!-- Expense -->
+                    <div class="rounded-2xl bg-white p-6 shadow-sm border border-gray-100">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-sm font-medium text-gray-500">المصروفات</p>
+                                <h3 class="mt-1 text-2xl font-bold text-gray-900">4,200</h3>
+                            </div>
+                            <div class="flex h-12 w-12 items-center justify-center rounded-full bg-red-50 text-red-600">
+                                <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 13l-5 5m0 0l-5-5m5 5V6" /></svg>
+                            </div>
+                        </div>
+                        <div class="mt-4 h-1.5 w-full rounded-full bg-red-500" style="width: 45%"></div>
+                    </div>
+
+                    <!-- Savings -->
+                    <div class="rounded-2xl bg-white p-6 shadow-sm border border-gray-100">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-sm font-medium text-gray-500">الادخار</p>
+                                <h3 class="mt-1 text-2xl font-bold text-gray-900">8,250</h3>
+                            </div>
+                            <div class="flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+                                <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            </div>
+                        </div>
+                        <div class="mt-4 h-1.5 w-full rounded-full bg-gray-100 overflow-hidden">
+                            <div class="h-full rounded-full bg-blue-500" style="width: 60%"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Transactions Table -->
+                <div class="rounded-2xl bg-white shadow-sm border border-gray-100 overflow-hidden">
+                    <div class="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+                        <h2 class="text-lg font-bold text-gray-900">آخر العمليات</h2>
+                        <a href="#" class="text-sm font-medium text-wafeer-600 hover:text-wafeer-700">عرض الكل &larr;</a>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-right text-sm">
+                            <thead class="bg-gray-50 text-gray-500">
+                                <tr>
+                                    <th class="whitespace-nowrap px-6 py-3 font-medium">التاريخ</th>
+                                    <th class="whitespace-nowrap px-6 py-3 font-medium">الجهة / الوصف</th>
+                                    <th class="whitespace-nowrap px-6 py-3 font-medium">الفئة</th>
+                                    <th class="whitespace-nowrap px-6 py-3 font-medium">المبلغ</th>
+                                    <th class="whitespace-nowrap px-6 py-3 font-medium">الحالة</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100">
+                                <tr class="group hover:bg-gray-50/50 transition-colors">
+                                    <td class="whitespace-nowrap px-6 py-4 text-gray-500">22 يناير، 10:30 ص</td>
+                                    <td class="whitespace-nowrap px-6 py-4">
+                                        <div class="flex items-center gap-3">
+                                            <div class="h-8 w-8 rounded-full bg-purple-100 flex items-center justify-center text-purple-600">
+                                                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" /></svg>
+                                            </div>
+                                            <span class="font-medium text-gray-900">تموينات السدحان</span>
+                                        </div>
+                                    </td>
+                                    <td class="whitespace-nowrap px-6 py-4 text-gray-500">مقاضي ومنزل</td>
+                                    <td class="whitespace-nowrap px-6 py-4 font-bold text-gray-900">-450 ر.س</td>
+                                    <td class="whitespace-nowrap px-6 py-4">
+                                        <span class="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800">مكتملة</span>
+                                    </td>
+                                </tr>
+                                <tr class="group hover:bg-gray-50/50 transition-colors">
+                                    <td class="whitespace-nowrap px-6 py-4 text-gray-500">21 يناير، 08:15 م</td>
+                                    <td class="whitespace-nowrap px-6 py-4">
+                                        <div class="flex items-center gap-3">
+                                            <div class="h-8 w-8 rounded-full bg-orange-100 flex items-center justify-center text-orange-600">
+                                                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                                            </div>
+                                            <span class="font-medium text-gray-900">مطعم البيك</span>
+                                        </div>
+                                    </td>
+                                    <td class="whitespace-nowrap px-6 py-4 text-gray-500">مطاعم</td>
+                                    <td class="whitespace-nowrap px-6 py-4 font-bold text-gray-900">-35 ر.س</td>
+                                    <td class="whitespace-nowrap px-6 py-4">
+                                        <span class="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800">مكتملة</span>
+                                    </td>
+                                </tr>
+                                <tr class="group hover:bg-gray-50/50 transition-colors">
+                                    <td class="whitespace-nowrap px-6 py-4 text-gray-500">20 يناير، 02:00 م</td>
+                                    <td class="whitespace-nowrap px-6 py-4">
+                                        <div class="flex items-center gap-3">
+                                            <div class="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
+                                                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                                            </div>
+                                            <span class="font-medium text-gray-900">راتب شهري</span>
+                                        </div>
+                                    </td>
+                                    <td class="whitespace-nowrap px-6 py-4 text-gray-500">دخل</td>
+                                    <td class="whitespace-nowrap px-6 py-4 font-bold text-green-600">+12,000 ر.س</td>
+                                    <td class="whitespace-nowrap px-6 py-4">
+                                        <span class="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800">مكتملة</span>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- Script for Dynamic Data Loading (Example) -->
+    <script>
+        // Simple function to call GAS server-side functions
+        function loadData() {
+            // google.script.run.withSuccessHandler(updateUI).getData();
+            console.log("Loading Data...");
+        }
+
+        function updateUI(data) {
+            // Update Card values using ID selectors
+            // document.getElementById('balanceDisplay').innerText = data.balance;
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', loadData);
+    </script>
+</body>
+</html>

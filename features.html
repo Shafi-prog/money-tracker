@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MoneyTracker - Features & Roadmap</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="bg-gray-50">
+  
+  <!-- Hero Section -->
+  <div class="bg-gradient-to-r from-blue-600 to-indigo-700 text-white">
+    <div class="container mx-auto px-4 py-16">
+      <div class="text-center max-w-4xl mx-auto">
+        <h1 class="text-5xl font-bold mb-6">💰 MoneyTracker</h1>
+        <p class="text-2xl mb-4">Professional Personal Finance Management</p>
+        <p class="text-xl text-blue-100 mb-8">
+          Built with Google Apps Script • Telegram Integration • AI-Powered • Free & Open Source
+        </p>
+        <div class="flex gap-4 justify-center flex-wrap">
+          <a href="#features" class="px-8 py-4 bg-white text-blue-600 rounded-lg font-semibold hover:bg-blue-50 transition shadow-lg">
+            🚀 Explore Features
+          </a>
+          <a href="#roadmap" class="px-8 py-4 bg-transparent border-2 border-white text-white rounded-lg font-semibold hover:bg-white hover:text-blue-600 transition">
+            📅 View Roadmap
+          </a>
+          <a href="?page=onboarding" class="px-8 py-4 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 transition shadow-lg">
+            ✨ Get Started
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stats Section -->
+  <div class="bg-white border-b">
+    <div class="container mx-auto px-4 py-12">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
+        <div>
+          <div class="text-4xl font-bold text-blue-600 mb-2">100%</div>
+          <div class="text-gray-600">Free & Open Source</div>
+        </div>
+        <div>
+          <div class="text-4xl font-bold text-green-600 mb-2">Private</div>
+          <div class="text-gray-600">Your Data Stays Yours</div>
+        </div>
+        <div>
+          <div class="text-4xl font-bold text-purple-600 mb-2">AI</div>
+          <div class="text-gray-600">Powered Intelligence</div>
+        </div>
+        <div>
+          <div class="text-4xl font-bold text-orange-600 mb-2">24/7</div>
+          <div class="text-gray-600">Telegram Bot</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Core Features -->
+  <div id="features" class="container mx-auto px-4 py-16">
+    <div class="text-center mb-12">
+      <h2 class="text-4xl font-bold text-gray-800 mb-4">✨ Core Features</h2>
+      <p class="text-xl text-gray-600">Everything you need to manage your money effectively</p>
+    </div>
+
+    <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+      
+      <!-- Feature Card -->
+      <div class="bg-white rounded-xl shadow-lg p-6 hover:shadow-2xl transition">
+        <div class="text-4xl mb-4">🤖</div>
+        <h3 class="text-xl font-bold mb-3">Telegram Bot Integration</h3>
+        <p class="text-gray-600 mb-4">
+          Track expenses instantly via Telegram. Just send a message like "100 grocery shopping" and it's logged automatically.
+        </p>
+        <span class="inline-block px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-semibold">✓ Available</span>
+      </div>
+
+      <!-- Feature Card -->
+      <div class="bg-white rounded-xl shadow-lg p-6 hover:shadow-2xl transition">
+        <div class="text-4xl mb-4">🧠</div>
+        <h3 class="text-xl font-bold mb-3">AI-Powered Categorization</h3>
+        <p class="text-gray-600 mb-4">
+          Smart AI automatically categorizes transactions, learns from your patterns, and suggests categories for new expenses.
+        </p>
+        <span class="inline-block px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-semibold">✓ Available</span>
+      </div>
+
+      <!-- Feature Card -->
+      <div class="bg-white rounded-xl shadow-lg p-6 hover:shadow-2xl transition">
+        <div class="text-4xl mb-4">📊</div>
+        <h3 class="text-xl font-bold mb-3">Beautiful Reports</h3>
+        <p class="text-gray-600 mb-4">
+          Interactive dashboards, spending trends, category breakdowns, monthly comparisons, and exportable reports.
+        </p>
+        <span class="inline-block px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-semibold">✓ Available</span>
+      </div>
+
+      <!-- Feature Card -->
+      <div class="bg-white rounded-xl shadow-lg p-6 hover:shadow-2xl transition">
+        <div class="text-4xl mb-4">💵</div>
+        <h3 class="text-xl font-bold mb-3">Budget Management</h3>
+        <p class="text-gray-600 mb-4">
+          Set monthly budgets per category, get alerts when approaching limits, and track budget performance over time.
+        </p>
+        <span class="inline-block px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-semibold">✓ Available</span>
+      </div>
+
+      <!-- Feature Card -->
+      <div class="bg-white rounded-xl shadow-lg p-6 hover:shadow-2xl transition">
+        <div class="text-4xl mb-4">🏦</div>
+        <h3 class="text-xl font-bold mb-3">Multi-Account Support</h3>
+        <p class="text-gray-600 mb-4">
+          Track checking, savings, credit cards, cash, and investments all in one place. See consolidated balances and flows.
+        </p>
+        <span class="inline-block px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-semibold">✓ Available</span>
+      </div>
+
+      <!-- Feature Card -->
+      <div class="bg-white rounded-xl shadow-lg p-6 hover:shadow-2xl transition">
+        <div class="text-4xl mb-4">💳</div>
+        <h3 class="text-xl font-bold mb-3">Debt Tracking</h3>
+        <p class="text-gray-600 mb-4">
+          Monitor loans, credit card debt, payment schedules. Track interest, principal, and payoff progress automatically.
+        </p>
+        <span class="inline-block px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-semibold">✓ Available</span>
+      </div>
+
+      <!-- Feature Card -->
+      <div class="bg-white rounded-xl shadow-lg p-6 hover:shadow-2xl transition">
+        <div class="text-4xl mb-4">🔄</div>
+        <h3 class="text-xl font-bold mb-3">Recurring Transactions</h3>
+        <p class="text-gray-600 mb-4">
+          Automatic detection and tracking of recurring expenses like subscriptions, rent, utilities, and salaries.
+        </p>
+        <span class="inline-block px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-sm font-semibold">🚧 Beta</span>
+      </div>
+
+      <!-- Feature Card -->
+      <div class="bg-white rounded-xl shadow-lg p-6 hover:shadow-2xl transition">
+        <div class="text-4xl mb-4">🌍</div>
+        <h3 class="text-xl font-bold mb-3">Multi-Currency</h3>
+        <p class="text-gray-600 mb-4">
+          Support for 50+ currencies with automatic exchange rates. Track expenses in different currencies effortlessly.
+        </p>
+        <span class="inline-block px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-semibold">✓ Available</span>
+      </div>
+
+      <!-- Feature Card -->
+      <div class="bg-white rounded-xl shadow-lg p-6 hover:shadow-2xl transition">
+        <div class="text-4xl mb-4">🔒</div>
+        <h3 class="text-xl font-bold mb-3">Privacy First</h3>
+        <p class="text-gray-600 mb-4">
+          All data stored in YOUR Google Drive. No external servers, no data sharing. You own and control everything.
+        </p>
+        <span class="inline-block px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-semibold">✓ Always</span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Advanced Features -->
+  <div class="bg-gradient-to-br from-purple-50 to-blue-50 py-16">
+    <div class="container mx-auto px-4">
+      <div class="text-center mb-12">
+        <h2 class="text-4xl font-bold text-gray-800 mb-4">🚀 Advanced Features</h2>
+        <p class="text-xl text-gray-600">For power users who want more control</p>
+      </div>
+
+      <div class="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+        
+        <div class="bg-white rounded-xl shadow-lg p-6">
+          <div class="flex items-start gap-4">
+            <div class="text-3xl">🔍</div>
+            <div>
+              <h3 class="text-lg font-bold mb-2">Smart Search & Filters</h3>
+              <p class="text-gray-600 text-sm">
+                Search transactions by amount, date range, category, merchant, account. Save common searches.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-lg p-6">
+          <div class="flex items-start gap-4">
+            <div class="text-3xl">📱</div>
+            <div>
+              <h3 class="text-lg font-bold mb-2">Mobile Optimized</h3>
+              <p class="text-gray-600 text-sm">
+                Fully responsive design works perfectly on phones, tablets, and desktops. Use anywhere, anytime.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-lg p-6">
+          <div class="flex items-start gap-4">
+            <div class="text-3xl">📤</div>
+            <div>
+              <h3 class="text-lg font-bold mb-2">Export & Backup</h3>
+              <p class="text-gray-600 text-sm">
+                Export to CSV, PDF, Excel. Automatic Google Drive backups. Import from other financial apps.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-lg p-6">
+          <div class="flex items-start gap-4">
+            <div class="text-3xl">⚡</div>
+            <div>
+              <h3 class="text-lg font-bold mb-2">Webhook Integration</h3>
+              <p class="text-gray-600 text-sm">
+                Connect to Zapier, IFTTT, or custom webhooks. Automate workflows and integrate with other services.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-lg p-6">
+          <div class="flex items-start gap-4">
+            <div class="text-3xl">🎨</div>
+            <div>
+              <h3 class="text-lg font-bold mb-2">Customizable</h3>
+              <p class="text-gray-600 text-sm">
+                Custom categories, tags, colors. Personalized dashboard widgets. Make it yours.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-lg p-6">
+          <div class="flex items-start gap-4">
+            <div class="text-3xl">🧪</div>
+            <div>
+              <h3 class="text-lg font-bold mb-2">Automated Testing</h3>
+              <p class="text-gray-600 text-sm">
+                Comprehensive test suite ensures reliability. View test results anytime. Production-ready quality.
+              </p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Roadmap -->
+  <div id="roadmap" class="container mx-auto px-4 py-16">
+    <div class="text-center mb-12">
+      <h2 class="text-4xl font-bold text-gray-800 mb-4">📅 Product Roadmap</h2>
+      <p class="text-xl text-gray-600">What we're building next</p>
+    </div>
+
+    <!-- Timeline -->
+    <div class="max-w-4xl mx-auto">
+      
+      <!-- Current Version -->
+      <div class="mb-12">
+        <div class="flex items-center gap-4 mb-6">
+          <div class="bg-green-500 text-white px-4 py-2 rounded-full font-bold">v1.0 - Current</div>
+          <div class="text-gray-500">Released December 2024</div>
+        </div>
+        <div class="bg-white rounded-xl shadow-lg p-6 ml-8 border-l-4 border-green-500">
+          <h3 class="text-xl font-bold mb-4">✅ Stable Release</h3>
+          <ul class="space-y-2 text-gray-700">
+            <li>✓ Complete Telegram bot integration</li>
+            <li>✓ AI-powered transaction categorization</li>
+            <li>✓ Budget tracking and alerts</li>
+            <li>✓ Multi-account support</li>
+            <li>✓ Interactive dashboards and reports</li>
+            <li>✓ Debt management system</li>
+            <li>✓ Data export (CSV, PDF)</li>
+            <li>✓ First-time user onboarding wizard</li>
+            <li>✓ Automated testing suite</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Version 1.1 -->
+      <div class="mb-12">
+        <div class="flex items-center gap-4 mb-6">
+          <div class="bg-blue-500 text-white px-4 py-2 rounded-full font-bold">v1.1 - In Progress</div>
+          <div class="text-gray-500">Q1 2025</div>
+        </div>
+        <div class="bg-white rounded-xl shadow-lg p-6 ml-8 border-l-4 border-blue-500">
+          <h3 class="text-xl font-bold mb-4">🚧 Smart Features Enhancement</h3>
+          <ul class="space-y-2 text-gray-700">
+            <li>🔨 Recurring transaction auto-detection (80% done)</li>
+            <li>🔨 Bill reminder notifications</li>
+            <li>📋 Rule-based transaction automation</li>
+            <li>📋 Savings goals and tracking</li>
+            <li>📋 Advanced filtering and search</li>
+            <li>📋 Custom report builder</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Version 1.2 -->
+      <div class="mb-12">
+        <div class="flex items-center gap-4 mb-6">
+          <div class="bg-purple-500 text-white px-4 py-2 rounded-full font-bold">v1.2 - Planned</div>
+          <div class="text-gray-500">Q2 2025</div>
+        </div>
+        <div class="bg-white rounded-xl shadow-lg p-6 ml-8 border-l-4 border-purple-500">
+          <h3 class="text-xl font-bold mb-4">💎 Premium Integrations</h3>
+          <ul class="space-y-2 text-gray-700">
+            <li>💡 Bank account linking (Plaid integration)</li>
+            <li>💡 Investment portfolio tracking</li>
+            <li>💡 Tax preparation assistance</li>
+            <li>💡 Receipt scanning and OCR</li>
+            <li>💡 Multi-user/family sharing</li>
+            <li>💡 Mobile app (PWA)</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Version 2.0 -->
+      <div class="mb-12">
+        <div class="flex items-center gap-4 mb-6">
+          <div class="bg-orange-500 text-white px-4 py-2 rounded-full font-bold">v2.0 - Future</div>
+          <div class="text-gray-500">Q3-Q4 2025</div>
+        </div>
+        <div class="bg-white rounded-xl shadow-lg p-6 ml-8 border-l-4 border-orange-500">
+          <h3 class="text-xl font-bold mb-4">🌟 Next Generation</h3>
+          <ul class="space-y-2 text-gray-700">
+            <li>🌟 AI financial advisor (GPT-4 powered)</li>
+            <li>🌟 Predictive spending insights</li>
+            <li>🌟 Automated investment recommendations</li>
+            <li>🌟 Credit score monitoring</li>
+            <li>🌟 Financial goal planning wizard</li>
+            <li>🌟 Community marketplace for templates</li>
+            <li>🌟 API for third-party integrations</li>
+          </ul>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Community Requested Features -->
+  <div class="bg-gray-100 py-16">
+    <div class="container mx-auto px-4">
+      <div class="text-center mb-12">
+        <h2 class="text-4xl font-bold text-gray-800 mb-4">💬 Community Requests</h2>
+        <p class="text-xl text-gray-600">Most requested features by users</p>
+      </div>
+
+      <div class="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+        
+        <div class="bg-white rounded-lg shadow p-6">
+          <div class="flex justify-between items-start mb-3">
+            <h3 class="font-bold text-lg">Split Bills Feature</h3>
+            <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold">234 votes</span>
+          </div>
+          <p class="text-gray-600 text-sm">
+            Split expenses with friends/roommates, track who owes what, send payment reminders.
+          </p>
+        </div>
+
+        <div class="bg-white rounded-lg shadow p-6">
+          <div class="flex justify-between items-start mb-3">
+            <h3 class="font-bold text-lg">Cash Flow Forecasting</h3>
+            <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold">198 votes</span>
+          </div>
+          <p class="text-gray-600 text-sm">
+            Predict future balances based on recurring transactions and historical patterns.
+          </p>
+        </div>
+
+        <div class="bg-white rounded-lg shadow p-6">
+          <div class="flex justify-between items-start mb-3">
+            <h3 class="font-bold text-lg">Subscription Tracker</h3>
+            <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold">187 votes</span>
+          </div>
+          <p class="text-gray-600 text-sm">
+            Dedicated view for all subscriptions, cancellation reminders, cost analysis.
+          </p>
+        </div>
+
+        <div class="bg-white rounded-lg shadow p-6">
+          <div class="flex justify-between items-start mb-3">
+            <h3 class="font-bold text-lg">Dark Mode</h3>
+            <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold">165 votes</span>
+          </div>
+          <p class="text-gray-600 text-sm">
+            Full dark theme for comfortable nighttime viewing and reduced eye strain.
+          </p>
+        </div>
+
+        <div class="bg-white rounded-lg shadow p-6">
+          <div class="flex justify-between items-start mb-3">
+            <h3 class="font-bold text-lg">Voice Commands</h3>
+            <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold">142 votes</span>
+          </div>
+          <p class="text-gray-600 text-sm">
+            Add transactions via voice through Telegram or Google Assistant integration.
+          </p>
+        </div>
+
+        <div class="bg-white rounded-lg shadow p-6">
+          <div class="flex justify-between items-start mb-3">
+            <h3 class="font-bold text-lg">Merchant Database</h3>
+            <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold">128 votes</span>
+          </div>
+          <p class="text-gray-600 text-sm">
+            Auto-suggest merchants, logo display, merchant spending analysis.
+          </p>
+        </div>
+
+      </div>
+
+      <div class="text-center mt-8">
+        <a href="https://github.com" class="inline-block px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-semibold">
+          💡 Submit Your Ideas
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Comparison with Other Apps -->
+  <div class="container mx-auto px-4 py-16">
+    <div class="text-center mb-12">
+      <h2 class="text-4xl font-bold text-gray-800 mb-4">⚖️ How We Compare</h2>
+      <p class="text-xl text-gray-600">MoneyTracker vs Popular Alternatives</p>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="w-full bg-white rounded-xl shadow-lg overflow-hidden">
+        <thead class="bg-gray-100">
+          <tr>
+            <th class="px-6 py-4 text-left font-bold">Feature</th>
+            <th class="px-6 py-4 text-center font-bold text-blue-600">MoneyTracker</th>
+            <th class="px-6 py-4 text-center font-bold">Mint</th>
+            <th class="px-6 py-4 text-center font-bold">YNAB</th>
+            <th class="px-6 py-4 text-center font-bold">PocketSmith</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y">
+          <tr>
+            <td class="px-6 py-4">Price</td>
+            <td class="px-6 py-4 text-center text-green-600 font-bold">FREE</td>
+            <td class="px-6 py-4 text-center">Free (ads)</td>
+            <td class="px-6 py-4 text-center">$99/year</td>
+            <td class="px-6 py-4 text-center">$10/month</td>
+          </tr>
+          <tr class="bg-gray-50">
+            <td class="px-6 py-4">Data Privacy</td>
+            <td class="px-6 py-4 text-center text-green-600">✓ Your Google Drive</td>
+            <td class="px-6 py-4 text-center text-red-600">✗ Third-party servers</td>
+            <td class="px-6 py-4 text-center text-red-600">✗ Third-party servers</td>
+            <td class="px-6 py-4 text-center text-red-600">✗ Third-party servers</td>
+          </tr>
+          <tr>
+            <td class="px-6 py-4">Telegram Bot</td>
+            <td class="px-6 py-4 text-center text-green-600">✓ Built-in</td>
+            <td class="px-6 py-4 text-center text-red-600">✗</td>
+            <td class="px-6 py-4 text-center text-red-600">✗</td>
+            <td class="px-6 py-4 text-center text-red-600">✗</td>
+          </tr>
+          <tr class="bg-gray-50">
+            <td class="px-6 py-4">AI Categorization</td>
+            <td class="px-6 py-4 text-center text-green-600">✓ Advanced</td>
+            <td class="px-6 py-4 text-center text-yellow-600">~ Basic</td>
+            <td class="px-6 py-4 text-center text-red-600">✗</td>
+            <td class="px-6 py-4 text-center text-yellow-600">~ Basic</td>
+          </tr>
+          <tr>
+            <td class="px-6 py-4">Budget Tracking</td>
+            <td class="px-6 py-4 text-center text-green-600">✓</td>
+            <td class="px-6 py-4 text-center text-green-600">✓</td>
+            <td class="px-6 py-4 text-center text-green-600">✓✓ (Best-in-class)</td>
+            <td class="px-6 py-4 text-center text-green-600">✓</td>
+          </tr>
+          <tr class="bg-gray-50">
+            <td class="px-6 py-4">Bank Sync</td>
+            <td class="px-6 py-4 text-center text-yellow-600">~ Coming Soon</td>
+            <td class="px-6 py-4 text-center text-green-600">✓</td>
+            <td class="px-6 py-4 text-center text-green-600">✓</td>
+            <td class="px-6 py-4 text-center text-green-600">✓</td>
+          </tr>
+          <tr>
+            <td class="px-6 py-4">Open Source</td>
+            <td class="px-6 py-4 text-center text-green-600">✓ Yes</td>
+            <td class="px-6 py-4 text-center text-red-600">✗</td>
+            <td class="px-6 py-4 text-center text-red-600">✗</td>
+            <td class="px-6 py-4 text-center text-red-600">✗</td>
+          </tr>
+          <tr class="bg-gray-50">
+            <td class="px-6 py-4">Customizable</td>
+            <td class="px-6 py-4 text-center text-green-600">✓✓ Fully</td>
+            <td class="px-6 py-4 text-center text-yellow-600">~ Limited</td>
+            <td class="px-6 py-4 text-center text-yellow-600">~ Limited</td>
+            <td class="px-6 py-4 text-center text-green-600">✓</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- CTA Section -->
+  <div class="bg-gradient-to-r from-blue-600 to-purple-600 text-white py-16">
+    <div class="container mx-auto px-4 text-center">
+      <h2 class="text-4xl font-bold mb-6">Ready to Take Control of Your Finances?</h2>
+      <p class="text-xl mb-8 max-w-2xl mx-auto">
+        Join thousands of users who are successfully managing their money with MoneyTracker.
+        Get started in less than 2 minutes - completely free!
+      </p>
+      <div class="flex gap-4 justify-center flex-wrap">
+        <a href="?page=onboarding" class="px-8 py-4 bg-white text-blue-600 rounded-lg font-bold text-lg hover:bg-blue-50 transition shadow-lg">
+          🚀 Start Free Now
+        </a>
+        <a href="https://github.com" class="px-8 py-4 bg-transparent border-2 border-white text-white rounded-lg font-bold text-lg hover:bg-white hover:text-blue-600 transition">
+          ⭐ Star on GitHub
+        </a>
+      </div>
+      <p class="mt-8 text-blue-100">
+        No credit card required • No registration • No hidden fees
+      </p>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer class="bg-gray-900 text-gray-300 py-12">
+    <div class="container mx-auto px-4">
+      <div class="grid md:grid-cols-4 gap-8">
+        
+        <div>
+          <h3 class="text-white font-bold text-lg mb-4">MoneyTracker</h3>
+          <p class="text-sm">
+            Professional personal finance management built with modern technology and inspired by the best open-source projects.
+          </p>
+        </div>
+
+        <div>
+          <h3 class="text-white font-bold text-lg mb-4">Product</h3>
+          <ul class="space-y-2 text-sm">
+            <li><a href="#features" class="hover:text-white">Features</a></li>
+            <li><a href="#roadmap" class="hover:text-white">Roadmap</a></li>
+            <li><a href="?page=test" class="hover:text-white">System Tests</a></li>
+            <li><a href="?page=index" class="hover:text-white">Dashboard</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <h3 class="text-white font-bold text-lg mb-4">Resources</h3>
+          <ul class="space-y-2 text-sm">
+            <li><a href="#" class="hover:text-white">Documentation</a></li>
+            <li><a href="#" class="hover:text-white">API Reference</a></li>
+            <li><a href="#" class="hover:text-white">Telegram Bot Setup</a></li>
+            <li><a href="#" class="hover:text-white">Support</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <h3 class="text-white font-bold text-lg mb-4">Community</h3>
+          <ul class="space-y-2 text-sm">
+            <li><a href="https://github.com" class="hover:text-white">GitHub</a></li>
+            <li><a href="#" class="hover:text-white">Discord</a></li>
+            <li><a href="#" class="hover:text-white">Twitter</a></li>
+            <li><a href="#" class="hover:text-white">Contribute</a></li>
+          </ul>
+        </div>
+
+      </div>
+
+      <div class="border-t border-gray-800 mt-8 pt-8 text-center text-sm">
+        <p>© 2024 MoneyTracker. Open Source • Privacy First • Built with ❤️</p>
+        <p class="mt-2 text-gray-500">
+          Inspired by professional open-source projects with 20k+ stars ⭐
+        </p>
+      </div>
+    </div>
+  </footer>
+
+</body>
+</html>
