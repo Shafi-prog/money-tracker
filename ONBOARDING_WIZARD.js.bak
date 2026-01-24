@@ -14,7 +14,7 @@
  * Check if user needs onboarding
  */
 function needsOnboarding() {
-  const ss = _ss();
+  const ss = SpreadsheetApp.getActive();
   const config = ss.getSheetByName('Config');
   
   if (!config) return true;
@@ -29,7 +29,7 @@ function needsOnboarding() {
  */
 function getOnboardingStatus() {
   try {
-    const ss = _ss();
+    const ss = SpreadsheetApp.getActive();
     const config = ss.getSheetByName('Config');
     
     if (!config) {
@@ -93,7 +93,7 @@ function getOnboardingStatus() {
  */
 function saveUserProfile(profileData) {
   try {
-    const ss = _ss();
+    const ss = SpreadsheetApp.getActive();
     let config = ss.getSheetByName('Config');
     
     if (!config) {
@@ -125,7 +125,7 @@ function saveUserProfile(profileData) {
  */
 function createInitialAccounts(accountsData) {
   try {
-    const ss = _ss();
+    const ss = SpreadsheetApp.getActive();
     let accountsSheet = ss.getSheetByName('Accounts');
     
     if (!accountsSheet) {
@@ -176,7 +176,7 @@ function createInitialAccounts(accountsData) {
  */
 function createInitialBudgets(budgetsData) {
   try {
-    const ss = _ss();
+    const ss = SpreadsheetApp.getActive();
     let budgetsSheet = ss.getSheetByName('Budgets');
     
     if (!budgetsSheet) {
@@ -226,7 +226,7 @@ function createInitialBudgets(budgetsData) {
  */
 function loadSampleData() {
   try {
-    const ss = _ss();
+    const ss = SpreadsheetApp.getActive();
     
     // Create sample accounts
     const sampleAccounts = {
@@ -296,7 +296,7 @@ function loadSampleData() {
  */
 function completeOnboarding() {
   try {
-    const ss = _ss();
+    const ss = SpreadsheetApp.getActive();
     let config = ss.getSheetByName('Config');
     
     if (!config) {
@@ -325,7 +325,7 @@ function completeOnboarding() {
  */
 function resetOnboarding() {
   try {
-    const ss = _ss();
+    const ss = SpreadsheetApp.getActive();
     const config = ss.getSheetByName('Config');
     
     if (config) {

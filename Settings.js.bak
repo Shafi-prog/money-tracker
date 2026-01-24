@@ -14,7 +14,7 @@
  */
 function getSettings() {
   try {
-    const ss = _ss();
+    const ss = SpreadsheetApp.getActive();
     let config = ss.getSheetByName('Config');
     
     const defaultSettings = {
@@ -94,7 +94,7 @@ function saveSettings(settingsData) {
       };
     }
     
-    const ss = _ss();
+    const ss = SpreadsheetApp.getActive();
     let config = ss.getSheetByName('Config');
     
     // Create Config sheet if doesn't exist
@@ -220,7 +220,7 @@ function setupTelegramWebhook(botToken) {
  */
 function resetAllData() {
   try {
-    const ss = _ss();
+    const ss = SpreadsheetApp.getActive();
     
     // Confirmation required
     const sheets = ['Config', 'Transactions', 'Accounts', 'Budgets'];

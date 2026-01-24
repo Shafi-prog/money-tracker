@@ -12,7 +12,7 @@ function SOV1_UI_saveBudget_(category, limit) {
       return { success: false, error: 'التصنيف والحد المطلوبان' };
     }
     
-    var ss = _ss();
+    var ss = SpreadsheetApp.getActive();
     var sheet = ss.getSheetByName('Budgets');
     
     if (!sheet) {
@@ -61,7 +61,7 @@ function SOV1_UI_updateBudget_(category, newLimit) {
       return { success: false, error: 'التصنيف والحد الجديد مطلوبان' };
     }
     
-    var ss = _ss();
+    var ss = SpreadsheetApp.getActive();
     var sheet = ss.getSheetByName('Budgets');
     
     if (!sheet) {
@@ -107,7 +107,7 @@ function SOV1_UI_deleteBudget_(category) {
       return { success: false, error: 'التصنيف مطلوب' };
     }
     
-    var ss = _ss();
+    var ss = SpreadsheetApp.getActive();
     var sheet = ss.getSheetByName('Budgets');
     
     if (!sheet) {
@@ -187,7 +187,7 @@ function recalculateBudgetSpent_() {
       return { success: true, message: 'Skipped - recently calculated', cached: true };
     }
     
-    var ss = _ss();
+    var ss = SpreadsheetApp.getActive();
     var budgetSheet = ss.getSheetByName('Budgets');
     var transSheet = ss.getSheetByName('Sheet1');
     

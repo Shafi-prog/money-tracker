@@ -140,7 +140,7 @@ function SOV1_UI_deleteTransaction_(rowId) {
  */
 function applyBudgetAmount_(category, amount) {
   try {
-    var ss = _ss();
+    var ss = SpreadsheetApp.getActive();
     var budgetSheet = ss.getSheetByName('Budgets');
     
     if (!budgetSheet) return;
@@ -169,7 +169,7 @@ function applyBudgetAmount_(category, amount) {
  */
 function reverseBudgetAmount_(category, amount) {
   try {
-    var ss = _ss();
+    var ss = SpreadsheetApp.getActive();
     var budgetSheet = ss.getSheetByName('Budgets');
     
     if (!budgetSheet) return;

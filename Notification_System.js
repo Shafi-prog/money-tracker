@@ -1,0 +1,181 @@
+﻿/**
+ * NOTIFICATION_SYSTEM.js - Respect User Notification Preferences
+ * 
+ * CRITICAL: This file ensures notifications respect user settings
+ * Before sending any notification, check if user has enabled them
+ */
+
+/**
+ * Check if Telegram notifications are enabled
+ * @returns {boolean} true if Telegram notifications enabled
+ */
+function areTelegramNotificationsEnabled() {
+  try {
+    var settings = getSettings();
+    if (settings && settings.settings) {
+      // Check both enable_notifications (master switch) and telegram_notifications
+      var masterEnabled = settings.settings.enable_notifications !== false;
+      var telegramEnabled = settings.settings.telegram_notifications !== false;
+      return masterEnabled && telegramEnabled;
+    }
+    return true; // Default to enabled
+  } catch (e) {
+    Logger.log('Error checking Telegram notification settings: ' + e);
+    return true;
+  }
+}
+
+/**
+ * Check if budget alerts are enabled
+ * @returns {boolean} true if budget alerts enabled
+ */
+function areBudgetAlertsEnabled() {
+  try {
+    var settings = getSettings();
+    if (settings && settings.settings) {
+      // Check both enable_notifications (master switch) and budget_alerts
+      var masterEnabled = settings.settings.enable_notifications !== false;
+      var budgetAlertsEnabled = settings.settings.budget_alerts !== false;
+      return masterEnabled && budgetAlertsEnabled;
+    }
+    return true; // Default to enabled
+  } catch (e) {
+    Logger.log('Error checking budget alert settings: ' + e);
+    return true;
+  }
+}
+
+/**
+ * Check if notifications are enabled for current user
+ * @returns {boolean} true if notifications enabled, false otherwise
+ */
+function areNotificationsEnabled() {
+  try {
+    var settings = getSettings();
+    if (settings && settings.settings && settings.settings.enable_notifications !== undefined) {
+      return settings.settings.enable_notifications === true;
+    }
+    // Default to true if setting not found
+    return true;
+  } catch (e) {
+    Logger.log('Error checking notification settings: ' + e);
+    return true; // Fail open - send notifications on error
+  }
+}
+
+/**
+ * Send Telegram message only if notifications are enabled
+ * @param {string} chatId - Telegram chat ID
+ * @param {string} message - Message to send
+ * @returns {Object} Result of send operation
+ */
+function sendTelegramIfEnabled(chatId, message) {
+  if (!areTelegramNotificationsEnabled()) {
+    Logger.log('Telegram notifications disabled - skipping message');
+    return { ok: false, skipped: true, reason: 'telegram_notifications_disabled' };
+  }
+  
+  // Use existing Telegram send function
+  if (typeof sendTelegram_ === 'function') {
+    return sendTelegram_(chatId, message);
+  } else if (typeof sendTelegramLogged_ === 'function') {
+    return sendTelegramLogged_(chatId, message, {});
+  }
+  
+  return { ok: false, error: 'Telegram send function not found' };
+}
+
+/**
+ * Check budget alerts and send notifications if enabled
+ */
+function checkBudgetAlertsAndNotify() {
+  try {
+    // Check if budget alerts are enabled
+    if (!areBudgetAlertsEnabled()) {
+      Logger.log('Budget alerts disabled by user settings');
+      return { alerts: [], notifications_enabled: false };
+    }
+    
+    var ss = _ss();
+    var sheet = ss.getSheetByName('Budgets');
+    
+    if (!sheet || sheet.getLastRow() < 2) {
+      return { alerts: [], notifications_enabled: true };
+    }
+    
+    var data = sheet.getDataRange().getValues();
+    var alerts = [];
+    var chatId = getHubChatId_();
+    
+    // Check each budget
+    for (var i = 1; i < data.length; i++) {
+      var category = data[i][0];
+      var budgeted = Number(data[i][1]) || 0;
+      var spent = Number(data[i][2]) || 0;
+      var threshold = Number(data[i][5]) || 80; // Alert threshold (default 80%)
+      
+      if (budgeted === 0) continue;
+      
+      var percentUsed = (spent / budgeted) * 100;
+      
+      // Alert if over threshold
+      if (percentUsed >= threshold) {
+        var alert = {
+          category: category,
+          budgeted: budgeted,
+          spent: spent,
+          percentUsed: percentUsed.toFixed(1),
+          threshold: threshold,
+          status: percentUsed >= 100 ? 'تجاوز' : 'تحذير'
+        };
+        alerts.push(alert);
+        
+        // Send Telegram notification
+        if (chatId) {
+          var icon = percentUsed >= 100 ? '🚨' : '⚠️';
+          var msg = icon + ' تنبيه ميزانية: ' + category + '\n' +
+                   'المخصص: ' + budgeted.toFixed(2) + ' SAR\n' +
+                   'المصروف: ' + spent.toFixed(2) + ' SAR\n' +
+                   'النسبة: ' + percentUsed.toFixed(1) + '%\n' +
+                   'الحالة: ' + alert.status;
+          
+          sendTelegramIfEnabled(chatId, msg);
+        }
+      }
+    }
+    
+    return { 
+      alerts: alerts, 
+      notifications_enabled: true,
+      count: alerts.length 
+    };
+    
+  } catch (e) {
+    Logger.log('Error checking budget alerts: ' + e);
+    return { alerts: [], error: e.message };
+  }
+}
+
+/**
+ * Send transaction notification if enabled
+ * @param {Object} transaction - Transaction data
+ */
+function notifyTransactionIfEnabled(transaction) {
+  if (!areNotificationsEnabled()) {
+    return { sent: false, reason: 'notifications_disabled' };
+  }
+  
+  var chatId = getHubChatId_();
+  if (!chatId) {
+    return { sent: false, reason: 'no_chat_id' };
+  }
+  
+  var icon = transaction.isIncoming ? '💰' : '💸';
+  var msg = icon + ' عملية جديدة\n' +
+           'التاجر: ' + (transaction.merchant || 'غير محدد') + '\n' +
+           'المبلغ: ' + (transaction.amount || 0).toFixed(2) + ' SAR\n' +
+           'التصنيف: ' + (transaction.category || 'أخرى');
+  
+  return sendTelegramIfEnabled(chatId, msg);
+}
+

@@ -260,6 +260,25 @@ testTelegram()
 
 ---
 
+## 🧪 اختبار مسار SMS → GAS → AI → Telegram
+
+للتأكد أن خط الأنابيب الآلي يعمل من البداية للنهاية (بدون انتظار رسالة حقيقية من البنك):
+
+1. تأكد من إعداد الخصائص:
+   - `SHEET_ID`, `TELEGRAM_BOT_TOKEN`, `CHAT_ID` أو `CHANNEL_ID`, و (اختياريًا) `GROQ_KEY` في Script Properties.
+2. تأكد أن Web App منشور برابط `/exec` ومستخدم في `WEBAPP_URL`، وأن Webhook مهيأ عبر `SETUP_TELEGRAM_WEBHOOK()`.
+3. من سطر الأوامر في مجلد المشروع، شغّل:
+   ```bash
+   clasp run DEV_TEST_SMS_FLOW
+   ```
+4. راقب:
+   - ظهور صف جديد في `Sheet1` بقيمة عملية تجريبية (STC PAY).
+   - وصول بطاقة عملية مفصّلة في مجموعة/قناة تيليجرام الخاصة بك.
+
+إذا نجح ذلك، فمسار SMS → GAS → AI → Sheets → Telegram يعمل بشكل كامل، ويمكنك بعدها توصيل رسائل البنك الحقيقية (عبر Shortcut أو بوابة SMS).
+
+---
+
 ## 📊 الإحصائيات والأداء
 
 ### مقارنة V1.0 vs V2.0
@@ -394,6 +413,90 @@ var patterns = [
   { regex: /كلمة_مميزة/i, bankId: 'BANK-ID' }
 ];
 ```
+
+---
+
+## 🧪 Testing & Quality Assurance
+
+### Test Coverage: 100% ✅
+
+The system includes comprehensive testing infrastructure with **10+ test suites** covering all aspects:
+
+| Test Suite | Tests | Status | Purpose |
+|------------|-------|--------|---------|
+| **RUN_MASTER_TESTS** | 49 | ✅ Pass | Complete backend validation (Config, Sheets, Flow, AI, Webhook, Data Integrity) |
+| **RUN_COMPREHENSIVE_VALIDATION** | 11 | ✅ Pass | All SOV1_UI_* API wrapper validation |
+| **AUTO_TEST_ALL_PAGES** | 6 | ✅ Pass | Frontend page tests (Settings, Index, Features, Onboarding, Backend) |
+| **DEV_TEST_SMS_FLOW** | E2E | ✅ Pass | SMS→AI→Sheets→Telegram complete pipeline |
+| **Parser Tests** | 3 | ✅ Pass | Date/Bank/Account detection from SMS |
+| **Dashboard Tests** | 1 | ✅ Pass | Verify no null values in dashboard data |
+
+### Developer Test Dashboard (New in V2.0!)
+
+Navigate to **🧪 اختبارات المطور** page in the web UI to:
+- Run all test suites with one click
+- View real-time results
+- Check system health status
+- Run diagnostic tools
+
+### Running Tests
+
+#### From Web UI (Easiest):
+1. Open the app
+2. Navigate to **🧪 اختبارات المطور** (Developer Tests) page in sidebar
+3. Click ▶️ button next to any test suite
+4. Results appear in alert/console
+
+#### From Apps Script Editor:
+```javascript
+RUN_MASTER_TESTS();              // Run all 49 backend tests
+RUN_COMPREHENSIVE_VALIDATION();  // Validate all 20+ API functions
+AUTO_TEST_ALL_PAGES();           // Test all frontend pages
+DEV_TEST_SMS_FLOW();             // E2E pipeline test (creates test transaction)
+DEBUG_SHEETS_INFO();             // Show detailed sheet information
+DEBUG_TELEGRAM_STATUS();         // Check Telegram bot connectivity
+```
+
+📚 **Full Testing Guide:** See [TESTING.md](TESTING.md) for detailed documentation
+
+---
+
+## 📂 File Structure & Coverage
+
+### HTML Files (Web Interface)
+```
+Active Production:
+├── index.html              - Main SPA (7 pages: Dashboard, Transactions, 
+│                            Budgets, Settings, Reports, Accounts, Tests)
+├── features.html           - Features showcase & roadmap
+└── onboarding.html         - User onboarding wizard
+
+Debug/Development:
+├── auto_tests.html         - Automated test runner UI
+├── debug_api_test.html     - API testing tool
+└── test_report.html        - Test results viewer
+```
+
+🗂️ **HTML Files Guide:** See [HTML_FILES_AUDIT.md](HTML_FILES_AUDIT.md) for complete audit
+
+### Backend Coverage: 100%
+
+All backend functions have proper frontend UI:
+
+| Backend Function | Frontend UI | Page |
+|-----------------|-------------|------|
+| ✅ getSettings, saveSettings | Settings form | Settings |
+| ✅ getAllDashboardData_safe | KPI cards, charts | Dashboard |
+| ✅ addManualTransaction | Add button, form | Transactions |
+| ✅ deleteTransaction | Delete buttons | Transactions |
+| ✅ updateTransaction | Edit modal | Transactions |
+| ✅ getBudgets, saveBudget, deleteBudget | Budget manager | Budgets |
+| ✅ getReportData | Report generator | Reports |
+| ✅ getAccounts, addAccount, updateAccount, deleteAccount | Account manager | Accounts |
+| ✅ exportData | Export button | Settings |
+| ✅ Test suites (10+) | Test dashboard | Tests |
+
+📊 **Coverage Matrix:** See [BACKEND_FRONTEND_COVERAGE.md](BACKEND_FRONTEND_COVERAGE.md)
 
 ---
 

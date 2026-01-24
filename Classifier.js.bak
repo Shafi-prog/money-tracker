@@ -5,7 +5,7 @@
  */
 function ensureClassifierMapExists_() {
   try {
-    var ss = _ss();
+    var ss = SpreadsheetApp.getActive();
     var sMap = ss.getSheetByName('Classifier_Map');
     
     if (!sMap) {

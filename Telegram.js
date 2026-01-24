@@ -92,6 +92,12 @@ function V120_removeMenuPanel_(chatId) { return removeMenuPanel_(chatId); }
 function sendBudgetsSnapshotToTelegram_() {
   var hub = getHubChatId_();
   if (!hub) return;
+  
+  // Check if budget alerts are enabled
+  if (typeof areBudgetAlertsEnabled === 'function' && !areBudgetAlertsEnabled()) {
+    Logger.log('Budget snapshot skipped - alerts disabled');
+    return;
+  }
 
   var cache = CacheService.getScriptCache();
   var cached = cache.get('BUDGET_SNAP');
@@ -140,6 +146,12 @@ function sendLastNToTelegram_(chatId, n) {
 
 /** ===== ملخص اليوم/الأسبوع/الشهر (Cache 15 ثانية) ===== */
 function sendPeriodSummary_(chatId, mode) {
+  // Check if notifications are enabled
+  if (typeof areNotificationsEnabled === 'function' && !areNotificationsEnabled()) {
+    sendTelegram_(chatId, 'الإشعارات معطلة في الإعدادات. يمكنك تفعيلها من صفحة الإعدادات.');
+    return;
+  }
+  
   var cache = CacheService.getScriptCache();
   var key = 'SUM_' + mode;
   var cached = cache.get(key);
@@ -276,18 +288,57 @@ function sendSovereignReportV120(ai, sync, src, raw, destChatId) {
   if (!dateStr) dateStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yy/M/d');
 
   // تحديد نوع العملية للعنوان
+  var isTransfer = /حوالة/i.test(type) || /حوالة/i.test(category);
+  var isPurchase = /شراء|مشتريات|pos/i.test(type) || /سوبرماركت|متجر|مطعم/i.test(category);
+  var isWithdrawal = /سحب/i.test(type);
+  
   var operationType = 'عملية';
-  if (/حوالة/i.test(type) || /حوالة/i.test(category)) operationType = 'حوالة';
-  else if (/شراء|مشتريات/i.test(type)) operationType = 'شراء';
-  else if (/سحب/i.test(type)) operationType = 'سحب';
+  if (isTransfer) operationType = 'حوالة';
+  else if (isPurchase) operationType = 'عملية';
+  else if (isWithdrawal) operationType = 'سحب';
 
   // الرمز حسب الاتجاه
   var directionEmoji = isIncoming ? '⬇️' : '⬆️';
   
-  // حساب إجمالي المصروف للتاجر في الشهر
+  // حساب إجمالي المصروف للتاجر/الشخص في فترة الراتب
   var monthlyStats = null;
-  if (!isIncoming && merchant && merchant !== 'غير محدد') {
+  var aggregationText = '';
+  
+  if (merchant && merchant !== 'غير محدد') {
     monthlyStats = getMonthlySpendFor_(merchant, 'merchant');
+    
+    // تحديد النص المناسب حسب نوع العملية
+    if (monthlyStats && monthlyStats.total > 0) {
+      if (isTransfer) {
+        // حوالة: إدانة أو استلام
+        if (isIncoming) {
+          aggregationText = '<b>إجمالي ما تم استلامه من ' + escHtml_(merchant) + '</b>\n';
+        } else {
+          aggregationText = '<b>إجمالي ما تم إدانته لـ ' + escHtml_(merchant) + '</b>\n';
+        }
+      } else {
+        // مشتريات: إجمالي المصروف من المتجر
+        aggregationText = '<b>إجمالي ما تم صرفه من متجر ' + escHtml_(merchant) + '</b>\n';
+      }
+      aggregationText += '💵 ' + monthlyStats.total.toFixed(2) + ' SAR (' + monthlyStats.count + ' عملية)\n';
+    }
+  }
+  
+  // استخراج البنك من النص الخام أو من الحساب
+  var bankName = '';
+  if (raw) {
+    var rawLower = String(raw).toLowerCase();
+    if (/الراجحي|alrajhi/i.test(rawLower)) bankName = 'الراجحي';
+    else if (/الأهلي|alinma/i.test(rawLower)) bankName = 'الأهلي';
+    else if (/الإنماء|alinma/i.test(rawLower)) bankName = 'الإنماء';
+    else if (/الرياض|riyad/i.test(rawLower)) bankName = 'الرياض';
+    else if (/fransi|saudi french|البنك السعودي الفرنسي/i.test(rawLower)) bankName = 'السعودي الفرنسي';
+    else if (/sabb|ساب/i.test(rawLower)) bankName = 'ساب';
+    else if (/bsf|السعودي الفرنسي/i.test(rawLower)) bankName = 'السعودي الفرنسي';
+    else if (/stc pay|stcpay/i.test(rawLower)) bankName = 'STC Pay';
+    else if (/urpay/i.test(rawLower)) bankName = 'urpay';
+    else if (/tiqmo/i.test(rawLower)) bankName = 'tiqmo';
+    else if (/mada/i.test(rawLower)) bankName = 'مدى';
   }
   
   // التنسيق المطلوب
@@ -296,14 +347,19 @@ function sendSovereignReportV120(ai, sync, src, raw, destChatId) {
     '━━━━━━━━━━━━━━\n' +
     '📅 <b>التاريخ:</b> ' + escHtml_(dateStr) + '\n' +
     '💰 <b>المبلغ:</b> ' + escHtml_(amount.toFixed(2)) + ' SAR ' + directionEmoji + '\n' +
-    '🆔 <b>الحساب:</b> ' + escHtml_(accNum || '-') + '\n' +
-    '🛒 <b>المتجر:</b> ' + escHtml_(merchant) + '\n' +
+    '🆔 <b>الحساب:</b> ' + escHtml_(accNum || '-') + '\n';
+  
+  // إضافة البنك إذا كان متاحاً
+  if (bankName) {
+    html += '<b>البنك:</b> ' + escHtml_(bankName) + '\n';
+  }
+  
+  html += '🛒 <b>المتجر:</b> ' + escHtml_(merchant) + '\n' +
     '🏷️ <b>التصنيف:</b> ' + escHtml_(category) + '\n';
   
-  // إضافة إجمالي المصروف للتاجر هذا الشهر
-  if (monthlyStats && monthlyStats.total > 0) {
-    html += '<b>إجمالي ما تم إدانته لـ ' + escHtml_(merchant) + '</b>\n';
-    html += '💵 ' + monthlyStats.total.toFixed(2) + ' SAR (' + monthlyStats.count + ' عملية)\n';
+  // إضافة إجمالي المصروف/الإدانة
+  if (aggregationText) {
+    html += aggregationText;
   }
   
   html += '━━━━━━━━━━━━━━\n' +

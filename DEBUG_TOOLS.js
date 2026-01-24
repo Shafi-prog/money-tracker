@@ -65,3 +65,27 @@ function DEBUG_RUN_TESTS() {
     throw new Error('RUN_MASTER_TESTS function not found!');
   }
 }
+
+/**
+ * 🧪 Developer helper: simulate a bank SMS through the full pipeline
+ * - Parses sample SMS text (AI/templates + fallback)
+ * - Inserts transaction into Sheet1 / Budgets
+ * - Sends Telegram report card to your main chat
+ *
+ * Run via:
+ *   clasp run DEV_TEST_SMS_FLOW
+ */
+function DEV_TEST_SMS_FLOW() {
+  var sample = 'خصم مبلغ 125.75 ريال من بطاقتك ****1234 لدى STC PAY في 2026/01/24';
+  var chatId = (typeof ENV !== 'undefined' && (ENV.CHAT_ID || ENV.CHANNEL_ID))
+    ? (ENV.CHAT_ID || ENV.CHANNEL_ID)
+    : PropertiesService.getScriptProperties().getProperty('CHAT_ID') || PropertiesService.getScriptProperties().getProperty('CHANNEL_ID');
+
+  if (!chatId) {
+    throw new Error('No CHAT_ID / CHANNEL_ID configured in ENV or Script Properties.');
+  }
+
+  var result = executeUniversalFlowV120(sample, 'DEV_TEST', chatId);
+  Logger.log('DEV_TEST_SMS_FLOW result: ' + JSON.stringify(result, null, 2));
+  return result;
+}

@@ -106,9 +106,25 @@ function executeUniversalFlowV120(smsText, source, destChatId) {
       else ai = SOV1_preParseFallback_(smsText);
     }
 
-    // 3) Classifier map (إن وجد)
-    try { if (typeof applyClassifierMap_ === 'function') ai = applyClassifierMap_(smsText, ai); } catch (eC) {}
-    try { if (typeof applySmartRules_ === 'function') ai = applySmartRules_(smsText, ai); } catch (eS) {}
+    // 3) Apply classifier map and smart rules (conditional on settings)
+    try {
+      var settings = getSettings();
+      var autoApplyEnabled = settings && settings.settings && settings.settings.auto_apply_rules === true;
+      
+      if (autoApplyEnabled) {
+        Logger.log('Auto-apply rules enabled - applying classifiers');
+        if (typeof applyClassifierMap_ === 'function') {
+          ai = applyClassifierMap_(smsText, ai);
+        }
+        if (typeof applySmartRules_ === 'function') {
+          ai = applySmartRules_(smsText, ai);
+        }
+      } else {
+        Logger.log('Auto-apply rules disabled - skipping classifiers');
+      }
+    } catch (eC) {
+      Logger.log('Error in classifier application: ' + eC);
+    }
 
     // 4) Accounts (إن وجد) لتحديد التحويل الداخلي
     try {
@@ -214,6 +230,15 @@ function syncQuadV120(data, raw, source) {
         sB.getRange(rowIdx, 3).setValue(curSpent + delta);
         SpreadsheetApp.flush();
         bRem = Number(sB.getRange(rowIdx, 4).getValue()) || 0;
+      }
+      
+      // Recalculate ONLY the affected category using salary period
+      if (typeof recalculateBudgetSpent_ === 'function') {
+        try {
+          recalculateBudgetSpent_();
+        } catch (eRecalc) {
+          Logger.log('Budget recalculation skipped: ' + eRecalc);
+        }
       }
     } catch (eB) {}
   }

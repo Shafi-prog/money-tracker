@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>DEBUG: Test API Call</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
+    .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
+    button { padding: 10px 20px; background: #4285f4; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    button:hover { background: #357ae8; }
+    pre { background: #f5f5f5; padding: 15px; border-radius: 4px; overflow-x: auto; }
+    .success { color: #0f9d58; }
+    .error { color: #db4437; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔍 Debug API Call Test</h1>
+    <p>This page tests if <code>SOV1_UI_getAllDashboardData</code> returns data.</p>
+    
+    <button onclick="testAPI()">▶️ Test API Call</button>
+    <button onclick="location.reload()">🔄 Reload</button>
+    
+    <div id="status" style="margin-top: 20px;"></div>
+    <div id="result" style="margin-top: 20px;"></div>
+  </div>
+  
+  <script>
+    function testAPI() {
+      const statusDiv = document.getElementById('status');
+      const resultDiv = document.getElementById('result');
+      
+      statusDiv.innerHTML = '<p>⏳ Calling SOV1_UI_getAllDashboardData(\'OPEN\')...</p>';
+      resultDiv.innerHTML = '';
+      
+      google.script.run
+        .withSuccessHandler(function(data) {
+          console.log('Raw response:', data);
+          
+          statusDiv.innerHTML = '<p class="success">✅ API call completed</p>';
+          
+          // Check if data is null/undefined
+          if (data === null || data === undefined) {
+            resultDiv.innerHTML = '<p class="error">❌ Response is NULL/UNDEFINED</p>' +
+              '<p>This means the backend function returned nothing.</p>';
+            return;
+          }
+          
+          // Check success flag
+          if (data.success === false) {
+            resultDiv.innerHTML = '<p class="error">❌ Backend returned success=false</p>' +
+              '<p><strong>Error:</strong> ' + (data.error || 'Unknown error') + '</p>' +
+              '<h3>Debug Log:</h3><pre>' + JSON.stringify(data.debugLog, null, 2) + '</pre>';
+            return;
+          }
+          
+          // Success case
+          resultDiv.innerHTML = '<p class="success">✅ Data received successfully!</p>' +
+            '<h3>Summary:</h3>' +
+            '<ul>' +
+            '<li>Transactions: ' + (data.transactions ? data.transactions.length : 0) + '</li>' +
+            '<li>Budgets: ' + (data.budgets ? data.budgets.length : 0) + '</li>' +
+            '<li>Accounts: ' + (data.accounts ? data.accounts.length : 0) + '</li>' +
+            '</ul>' +
+            '<h3>Debug Log:</h3>' +
+            '<pre>' + JSON.stringify(data.debugLog, null, 2) + '</pre>' +
+            '<h3>Full Response:</h3>' +
+            '<pre>' + JSON.stringify(data, null, 2).substring(0, 5000) + '</pre>';
+        })
+        .withFailureHandler(function(error) {
+          console.error('API call failed:', error);
+          statusDiv.innerHTML = '<p class="error">❌ API call failed</p>';
+          resultDiv.innerHTML = '<p><strong>Error message:</strong> ' + error.message + '</p>' +
+            '<pre>' + error.stack + '</pre>';
+        })
+        .SOV1_UI_getAllDashboardData('OPEN');
+    }
+    
+    // Auto-run on load
+    window.onload = function() {
+      console.log('Debug page loaded. Click "Test API Call" button.');
+    };
+  </script>
+</body>
+</html>

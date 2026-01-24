@@ -307,28 +307,35 @@ function SOV1_UI_addManualTransaction_(text) {
 
 /**
  * Save user settings
+ * Uses professional Settings.js implementation (Config sheet) when available
  */
 function SOV1_UI_saveSettings_(settings) {
   try {
+    // Preferred path: delegate to Settings.js logic which persists to Config sheet
+    if (typeof saveSettings === 'function') {
+      return saveSettings(settings || {});
+    }
+
+    // Fallback to legacy ScriptProperties behavior (kept for backward compatibility)
     var props = PropertiesService.getScriptProperties();
     var updated = [];
     
-    if (settings && settings.name) {
-      props.setProperty('OWNER', settings.name);
+    if (settings && settings.user_name) {
+      props.setProperty('OWNER', settings.user_name);
       updated.push('الاسم');
     }
     
-    if (settings && settings.email) {
-      props.setProperty('USER_EMAIL', settings.email);
+    if (settings && settings.user_email) {
+      props.setProperty('USER_EMAIL', settings.user_email);
       updated.push('البريد');
     }
     
-    if (settings && typeof settings.notifications !== 'undefined') {
-      props.setProperty('NOTIFICATIONS_ENABLED', String(settings.notifications));
+    if (settings && typeof settings.enable_notifications !== 'undefined') {
+      props.setProperty('NOTIFICATIONS_ENABLED', String(settings.enable_notifications));
       updated.push('الإشعارات');
     }
     
-    Logger.log('Settings saved: ' + updated.join(', '));
+    Logger.log('Settings saved (fallback): ' + updated.join(', '));
     return { success: true, message: 'تم الحفظ: ' + updated.join(', ') };
   } catch (e) {
     Logger.log('Save settings error: ' + e.message);
@@ -558,8 +565,17 @@ function SOV1_UI_getReportData_(token, period) {
     } else if (period === 'weekly') {
       startDate = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
     } else {
-      // monthly by default
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      // monthly - use salary day instead of calendar month
+      var settings = getSettings();
+      var salaryDay = (settings && settings.settings && settings.settings.salary_day) || 1;
+      
+      if (now.getDate() >= salaryDay) {
+        // Past salary day this month
+        startDate = new Date(now.getFullYear(), now.getMonth(), salaryDay);
+      } else {
+        // Before salary day - use last month's salary day
+        startDate = new Date(now.getFullYear(), now.getMonth() - 1, salaryDay);
+      }
     }
     
     var income = 0;
@@ -861,32 +877,336 @@ function SOV1_UI_getTransaction(rowId) {
 }
 
 // ============================================================================
+// ACCOUNTS MANAGEMENT API WRAPPERS
+// ============================================================================
+
+function SOV1_UI_addAccount(accountData) {
+  try {
+    if (typeof SOV1_UI_addAccount_ === 'function') {
+      return SOV1_UI_addAccount_(accountData);
+    }
+    return { success: false, error: 'Function SOV1_UI_addAccount_ not found' };
+  } catch (e) {
+    Logger.log('Error in SOV1_UI_addAccount: ' + e);
+    return { success: false, error: e.message };
+  }
+}
+
+function SOV1_UI_updateAccount(accountId, accountData) {
+  try {
+    if (typeof SOV1_UI_updateAccount_ === 'function') {
+      return SOV1_UI_updateAccount_(accountId, accountData);
+    }
+    return { success: false, error: 'Function SOV1_UI_updateAccount_ not found' };
+  } catch (e) {
+    Logger.log('Error in SOV1_UI_updateAccount: ' + e);
+    return { success: false, error: e.message };
+  }
+}
+
+function SOV1_UI_deleteAccount(accountId) {
+  try {
+    if (typeof SOV1_UI_deleteAccount_ === 'function') {
+      return SOV1_UI_deleteAccount_(accountId);
+    }
+    return { success: false, error: 'Function SOV1_UI_deleteAccount_ not found' };
+  } catch (e) {
+    Logger.log('Error in SOV1_UI_deleteAccount: ' + e);
+    return { success: false, error: e.message };
+  }
+}
+
+function SOV1_UI_extractAccountFromSMS(smsText) {
+  try {
+    // Use AI to extract account info from SMS
+    if (typeof extractAccountInfoFromSMS === 'function') {
+      return extractAccountInfoFromSMS(smsText);
+    }
+    
+    // Fallback: Basic regex extraction
+    var result = {
+      name: '',
+      type: 'بنك',
+      number: '',
+      bank: '',
+      aliases: ''
+    };
+    
+    var text = String(smsText || '');
+    
+    // Extract bank name
+    if (/AlRajhi|الراجحي/i.test(text)) {
+      result.bank = 'AlRajhiBank';
+      result.name = 'الراجحي';
+    } else if (/STC\s*Pay/i.test(text)) {
+      result.bank = 'STC Pay';
+      result.name = 'STC Pay';
+      result.type = 'محفظة';
+    } else if (/tiqmo/i.test(text)) {
+      result.bank = 'tiqmo';
+      result.name = 'tiqmo';
+      result.type = 'محفظة';
+    }
+    
+    // Extract account/card number (last 4 digits)
+    var numMatch = text.match(/(\d{4})/);
+    if (numMatch) {
+      result.number = numMatch[1];
+      if (result.name) {
+        result.name += ' ' + result.number;
+      }
+    }
+    
+    return {
+      success: true,
+      account: result
+    };
+  } catch (e) {
+    Logger.log('Error in SOV1_UI_extractAccountFromSMS: ' + e);
+    return { success: false, error: e.message };
+  }
+}
+
+// ============================================================================
+// DATA MANAGEMENT - EXPORT & DELETE
+// ============================================================================
+
+/**
+ * Export all transactions as CSV
+ */
+function SOV1_UI_exportData() {
+  try {
+    var ss = _ss(); // Use _ss() for web app context
+    var sheet = ss.getSheetByName('Sheet1');
+    
+    if (!sheet || sheet.getLastRow() < 2) {
+      return 'ID,Date,Merchant,Type,Amount,Category,Account\n';
+    }
+    
+    var data = sheet.getDataRange().getValues();
+    var csv = 'ID,Date,Merchant,Type,Amount,Category,Account,Notes\n';
+    
+    // Start from row 1 (skip header at row 0)
+    for (var i = 1; i < data.length; i++) {
+      var row = data[i];
+      var id = row[0] || '';
+      var date = row[1] ? Utilities.formatDate(new Date(row[1]), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss') : '';
+      var merchant = String(row[9] || '').replace(/"/g, '""'); // Escape quotes
+      var type = row[3] || '';
+      var amount = row[8] || 0;
+      var category = row[10] || '';
+      var account = row[6] || '';
+      var notes = String(row[11] || '').replace(/"/g, '""');
+      
+      csv += '"' + id + '","' + date + '","' + merchant + '","' + type + '","' + amount + '","' + category + '","' + account + '","' + notes + '"\n';
+    }
+    
+    return csv;
+    
+  } catch (e) {
+    Logger.log('Error exporting data: ' + e);
+    return 'Error,' + e.message + '\n';
+  }
+}
+
+/**
+ * Delete all user data (DANGEROUS)
+ */
+function SOV1_UI_deleteAccount() {
+  try {
+    var ss = _ss(); // Use _ss() for web app context
+    
+    // Clear all data sheets (keep headers)
+    var sheetsToClean = ['Sheet1', 'Budgets', 'Accounts', 'Debt_Ledger', 'Config'];
+    
+    for (var i = 0; i < sheetsToClean.length; i++) {
+      var sheetName = sheetsToClean[i];
+      var sheet = ss.getSheetByName(sheetName);
+      
+      if (sheet && sheet.getLastRow() > 1) {
+        // Delete all data rows but keep header
+        sheet.deleteRows(2, sheet.getLastRow() - 1);
+      }
+    }
+    
+    // Delete Classifier_Map completely if it exists
+    var classifierSheet = ss.getSheetByName('Classifier_Map');
+    if (classifierSheet) {
+      ss.deleteSheet(classifierSheet);
+    }
+    
+    Logger.log('Account deleted by user: ' + Session.getActiveUser().getEmail());
+    
+    return {
+      success: true,
+      message: 'تم حذف جميع البيانات بنجاح'
+    };
+    
+  } catch (e) {
+    Logger.log('Error deleting account: ' + e);
+    return {
+      success: false,
+      error: 'فشل حذف الحساب: ' + e.message
+    };
+  }
+}
+
+// ============================================================================
 // OPTIMIZED: Single API call to get all dashboard data at once
 // ============================================================================
 
 function SOV1_UI_getAllDashboardData(token) {
+  var debugLog = [];
+  
   try {
+    debugLog.push('🔷 Function started');
     token = token || 'OPEN';
     
-    // Get all data in parallel from sheets (more efficient)
-    var dashboard = SOV1_UI_getDashboard_(token);
-    var transactions = SOV1_UI_getLatest_(token, 50);
-    var budgets = SOV1_UI_getBudgets_(token);
-    var accounts = SOV1_UI_getAccounts_();
+    // CRITICAL: Check if SpreadsheetApp is accessible via SHEET_ID
+    try {
+      var ss = _ss(); // Use _ss() instead of getActive() for web app context
+      debugLog.push('✅ SpreadsheetApp accessible via SHEET_ID: ' + ss.getId());
+    } catch (ssError) {
+      return {
+        success: false,
+        error: 'Cannot access spreadsheet: ' + ssError.message + ' (SHEET_ID might be missing in Script Properties)',
+        debugLog: debugLog,
+        dashboard: { kpi: { incomeM: 0, spendM: 0, netM: 0, totalRemain: 0 }, dup7d: [] },
+        transactions: [],
+        budgets: [],
+        accounts: []
+      };
+    }
     
-    return {
+    // Verify authentication
+    debugLog.push('🔐 Checking authentication...');
+    if (!SOV1_UI_requireAuth_(token)) {
+      debugLog.push('❌ Authentication failed');
+      return {
+        success: false,
+        error: 'غير مصرح - Authentication failed',
+        debugLog: debugLog,
+        dashboard: { kpi: { incomeM: 0, spendM: 0, netM: 0, totalRemain: 0 }, dup7d: [] },
+        transactions: [],
+        budgets: [],
+        accounts: []
+      };
+    }
+    
+    debugLog.push('✅ Authentication passed');
+    
+    // Get all data with detailed error tracking
+    var dashboard, transactions, budgets, accounts;
+    
+    try {
+      debugLog.push('📊 Fetching dashboard...');
+      dashboard = SOV1_UI_getDashboard_(token);
+      debugLog.push('✅ Dashboard fetched: ' + (dashboard ? 'OK' : 'NULL'));
+    } catch (e) {
+      debugLog.push('⚠️ Dashboard error: ' + e.message);
+      dashboard = { kpi: { incomeM: 0, spendM: 0, netM: 0, totalRemain: 0 }, dup7d: [] };
+    }
+    
+    try {
+      debugLog.push('📝 Fetching transactions...');
+      transactions = SOV1_UI_getLatest_(token, 50);
+      debugLog.push('✅ Transactions fetched: ' + (transactions ? transactions.length : 0));
+    } catch (e) {
+      debugLog.push('⚠️ Transactions error: ' + e.message);
+      transactions = [];
+    }
+    
+    try {
+      debugLog.push('💰 Fetching budgets...');
+      budgets = SOV1_UI_getBudgets_(token);
+      debugLog.push('✅ Budgets fetched: ' + (budgets ? budgets.length : 0));
+    } catch (e) {
+      debugLog.push('⚠️ Budgets error: ' + e.message);
+      budgets = [];
+    }
+    
+    try {
+      debugLog.push('🏦 Fetching accounts...');
+      accounts = SOV1_UI_getAccounts_();
+      debugLog.push('✅ Accounts fetched: ' + (accounts ? accounts.length : 0));
+    } catch (e) {
+      debugLog.push('⚠️ Accounts error: ' + e.message);
+      accounts = [];
+    }
+    
+    debugLog.push('✅ All data collected successfully');
+    
+    var result = {
       success: true,
+      debugLog: debugLog,
       dashboard: dashboard,
       transactions: transactions,
       budgets: budgets,
       accounts: accounts
     };
+    
+    return result;
+    
   } catch (e) {
-    Logger.log('Error in SOV1_UI_getAllDashboardData: ' + e);
+    debugLog.push('❌ CRITICAL Error: ' + e.message);
+    debugLog.push('Stack: ' + e.stack);
+    
     return {
       success: false,
       error: e.message,
-      dashboard: { kpi: { incomeM: 0, spendM: 0, netM: 0, totalRemain: 0 }, recent: [], budgets: [] },
+      errorStack: e.stack,
+      debugLog: debugLog,
+      dashboard: { kpi: { incomeM: 0, spendM: 0, netM: 0, totalRemain: 0 }, dup7d: [] },
+      transactions: [],
+      budgets: [],
+      accounts: []
+    };
+  }
+}
+
+// ============================================================================
+// SAFE WRAPPER: Ensures non-null, JSON-serializable response for web UI
+// Call this from google.script.run instead of SOV1_UI_getAllDashboardData
+// ============================================================================
+
+function SOV1_UI_getAllDashboardData_safe(token) {
+  var wrapperLog = [];
+  try {
+    wrapperLog.push('Wrapper: calling SOV1_UI_getAllDashboardData');
+    var raw = SOV1_UI_getAllDashboardData(token);
+
+    if (!raw || typeof raw !== 'object') {
+      wrapperLog.push('Wrapper: raw result is null or non-object');
+      return {
+        success: false,
+        error: 'Server returned empty or invalid response',
+        debugLog: wrapperLog,
+        dashboard: { kpi: { incomeM: 0, spendM: 0, netM: 0, totalRemain: 0 }, dup7d: [] },
+        transactions: [],
+        budgets: [],
+        accounts: []
+      };
+    }
+
+    // Force JSON-safe clone to avoid serialization issues
+    var cloned = JSON.parse(JSON.stringify(raw));
+
+    if (!cloned.debugLog || !Array.isArray(cloned.debugLog)) {
+      cloned.debugLog = [];
+    }
+
+    cloned.debugLog = cloned.debugLog.concat(wrapperLog);
+    cloned.debugLog.push('Wrapper: JSON-safe clone OK');
+
+    return cloned;
+  } catch (e) {
+    wrapperLog.push('Wrapper error: ' + e.message);
+    return {
+      success: false,
+      error: 'SOV1_UI_getAllDashboardData_safe failed: ' + e.message,
+      errorStack: e.stack,
+      debugLog: wrapperLog,
+      dashboard: { kpi: { incomeM: 0, spendM: 0, netM: 0, totalRemain: 0 }, dup7d: [] },
       transactions: [],
       budgets: [],
       accounts: []

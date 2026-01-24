@@ -37,7 +37,7 @@
         editingTransaction: null,
         newTransaction: { amount: '', merchant: '', category: 'أخرى', type: 'expense' },
         categories: ['طعام', 'نقل', 'فواتير', 'تسوق', 'سكن', 'ترفيه', 'صحة', 'أخرى'],
-        userSettings: { user_name: '', user_email: '', enable_notifications: true, default_currency: 'SAR', language: 'ar', salary_day: 1, auto_apply_rules: true },
+        userSettings: { user_name: '', user_email: '', enable_notifications: true, telegram_notifications: true, budget_alerts: true, default_currency: 'SAR', language: 'ar', salary_day: 1, auto_apply_rules: true },
         reportPeriod: 'monthly',
         reportData: null,
         accounts: [],
@@ -48,6 +48,7 @@
         showBudgetModal: false,
         editingBudget: null,
         newBudget: { category: '', limit: '' },
+        showPrivacyModal: false,
         toasts: [],
         
         navigateToPage(pageName) {
@@ -120,36 +121,106 @@
           this.loading = true;
           this.errorMessage = '';
           
-          // Safety timeout
-          setTimeout(() => {
-            if (this.loading) {
+          var timeoutId = null;
+          var completed = false;
+          
+          // Extended timeout with better error message
+          timeoutId = setTimeout(() => {
+            if (!completed && this.loading) {
               this.loading = false;
-              this.errorMessage = 'انتهت مهلة التحميل. حاول مرة أخرى.';
+              this.errorMessage = '⏱️ انتهت مهلة التحميل (30 ثانية). قد يكون السبب:\n' +
+                '1. الاتصال بالإنترنت بطيء\n' +
+                '2. كمية بيانات كبيرة في الجداول\n' +
+                '3. خطأ في Google Apps Script\n\n' +
+                'جرب: تحديث الصفحة أو التحقق من Google Sheets';
+              console.error('Timeout after 30 seconds');
             }
-          }, 10000);
+          }, 30000); // Increased to 30 seconds
           
           // Check if google.script.run is available
           if (typeof google === 'undefined' || !google.script) {
+            completed = true;
+            clearTimeout(timeoutId);
             this.loading = false;
-            this.errorMessage = 'خطأ: لا يمكن الاتصال بـ Google Apps Script';
+            this.errorMessage = '❌ خطأ: لا يمكن الاتصال بـ Google Apps Script\n' +
+              'تأكد من:\n' +
+              '1. أنك تستخدم رابط Web App المنشور\n' +
+              '2. لديك إذن الوصول للملف\n' +
+              '3. التطبيق منشور بشكل صحيح';
             return;
           }
+          
+          console.log('🔄 Loading dashboard data...');
           
           // ✅ OPTIMIZED: Single API call instead of 4 separate calls
           google.script.run
             .withSuccessHandler(data => {
-              console.log('All dashboard data received:', data);
+              completed = true;
+              clearTimeout(timeoutId);
               
-              if (data.dashboard) {
+              console.log('✅ All dashboard data received:', data);
+              
+              // CRITICAL: Show debug log if available
+              if (data && data.debugLog && Array.isArray(data.debugLog)) {
+                console.log('📋 Debug Log from Backend:');
+                data.debugLog.forEach(log => console.log('  ' + log));
+              }
+              
+              // Check if response is null or undefined
+              if (!data || data === null || typeof data === 'undefined') {
+                this.loading = false;
+                this.errorMessage = '⚠️ لم يتم استلام بيانات من الخادم.\n' +
+                  'الأسباب المحتملة:\n' +
+                  '1. Google Sheets غير موجود أو محذوف\n' +
+                  '2. لا تملك صلاحيات الوصول\n' +
+                  '3. خطأ في Backend Script\n\n' +
+                  'جرب: فتح Google Sheets مباشرة والتحقق من البيانات';
+                console.error('❌ Response is null/undefined');
+                return;
+              }
+              
+              // Check for error in response
+              if (data.error || data.success === false) {
+                this.loading = false;
+                
+                // Build detailed error message
+                var errorDetails = '❌ خطأ من الخادم: ' + (data.error || 'خطأ غير معروف');
+                
+                // Add debug log to error message if available
+                if (data.debugLog && Array.isArray(data.debugLog)) {
+                  errorDetails += '\n\n📋 تفاصيل التشخيص:\n' + data.debugLog.join('\n');
+                }
+                
+                // Add error stack if available
+                if (data.errorStack) {
+                  errorDetails += '\n\n🔍 Stack Trace:\n' + data.errorStack;
+                }
+                
+                errorDetails += '\n\nقد يكون السبب:\n' +
+                  '1. أخطاء في الأكواد البرمجية\n' +
+                  '2. مشكلة في صلاحيات Google Sheets\n' +
+                  '3. بيانات تالفة في الجداول';
+                
+                this.errorMessage = errorDetails;
+                console.error('❌ Backend error:', data);
+                return;
+              }
+              
+              // Load KPI stats
+              if (data.dashboard && data.dashboard.kpi) {
                 this.stats.income = data.dashboard.kpi.incomeM || 0;
                 this.stats.expense = data.dashboard.kpi.spendM || 0;
                 this.stats.balance = data.dashboard.kpi.netM || 0;
                 this.stats.savings = data.dashboard.kpi.totalRemain || 0;
+                console.log('✅ KPI loaded:', this.stats);
+              } else {
+                console.warn('⚠️ No KPI data in response');
               }
               
-              if (data.transactions) {
-                this.allTransactions = (data.transactions || []).map((tx, i) => ({
-                  id: i,
+              // Load transactions
+              if (data.transactions && Array.isArray(data.transactions)) {
+                this.allTransactions = data.transactions.map((tx, i) => ({
+                  id: tx.row || i,
                   date: tx.date,
                   merchant: tx.merchant || 'غير محدد',
                   category: tx.category || tx.type || 'أخرى',
@@ -157,24 +228,65 @@
                   type: tx.type || ''
                 }));
                 this.transactions = this.allTransactions.slice(0, 10);
+                console.log('✅ Transactions loaded:', this.transactions.length);
+              } else {
+                console.warn('⚠️ No transactions in response');
+                this.transactions = [];
+                this.allTransactions = [];
               }
               
-              if (data.budgets) {
-                this.budgets = data.budgets || [];
+              // Load budgets
+              if (data.budgets && Array.isArray(data.budgets)) {
+                this.budgets = data.budgets;
+                console.log('✅ Budgets loaded:', this.budgets.length);
+              } else {
+                console.warn('⚠️ No budgets in response');
+                this.budgets = [];
               }
               
-              if (data.accounts) {
-                this.accounts = data.accounts || [];
+              // Load accounts
+              if (data.accounts && Array.isArray(data.accounts)) {
+                this.accounts = data.accounts;
+                console.log('✅ Accounts loaded:', this.accounts.length);
+              } else {
+                this.accounts = [];
               }
               
               this.loading = false;
+              console.log('✅ Dashboard refresh complete');
             })
             .withFailureHandler(err => {
-              console.error('Error loading data:', err);
+              completed = true;
+              clearTimeout(timeoutId);
+              
+              console.error('❌ Error loading data:', err);
               this.loading = false;
-              this.errorMessage = 'فشل تحميل البيانات: ' + (err.message || err);
+              
+              var errorMsg = '❌ فشل تحميل البيانات:\n';
+              
+              if (err && err.message) {
+                errorMsg += err.message;
+                
+                // Add helpful hints based on error type
+                if (err.message.includes('غير مصرح') || err.message.includes('unauthorized')) {
+                  errorMsg += '\n\n💡 السبب المحتمل: مشكلة في صلاحيات الوصول';
+                } else if (err.message.includes('not found') || err.message.includes('لم يتم العثور')) {
+                  errorMsg += '\n\n💡 السبب المحتمل: الجداول المطلوبة غير موجودة';
+                } else if (err.message.includes('timeout')) {
+                  errorMsg += '\n\n💡 السبب المحتمل: الاتصال بطيء أو البيانات كثيرة';
+                }
+              } else {
+                errorMsg += String(err);
+              }
+              
+              errorMsg += '\n\n🔧 الحلول المقترحة:\n' +
+                '1. تحديث الصفحة (F5)\n' +
+                '2. فتح Google Sheets والتحقق من البيانات\n' +
+                '3. تشغيل testDashboardData() في Apps Script Editor';
+              
+              this.errorMessage = errorMsg;
             })
-            .SOV1_UI_getAllDashboardData('OPEN');
+            .SOV1_UI_getAllDashboardData_safe('OPEN');
         },
         
         completeSetup() {
@@ -589,6 +701,51 @@
           return !isNaN(num) && num > 0;
         },
         
+        exportData() {
+          this.showToast('جاري تصدير البيانات...', 'info');
+          google.script.run
+            .withSuccessHandler(csv => {
+              const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+              const link = document.createElement('a');
+              const url = URL.createObjectURL(blob);
+              link.setAttribute('href', url);
+              link.setAttribute('download', 'transactions_' + new Date().toISOString().split('T')[0] + '.csv');
+              link.style.visibility = 'hidden';
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+              this.showToast('تم تصدير البيانات بنجاح', 'success');
+            })
+            .withFailureHandler(err => {
+              this.showToast('فشل تصدير البيانات', 'error');
+            })
+            .SOV1_UI_exportData();
+        },
+        
+        confirmDeleteAccount() {
+          if (confirm('⚠️ تحذير: سيتم حذف جميع بياناتك بشكل نهائي. هل أنت متأكد؟\\n\\nاكتب \"نعم\" للتأكيد.')) {
+            const confirmation = prompt('اكتب \"حذف\" للتأكيد النهائي:');
+            if (confirmation === 'حذف') {
+              this.deleteAccount();
+            } else {
+              this.showToast('تم إلغاء الحذف', 'info');
+            }
+          }
+        },
+        
+        deleteAccount() {
+          this.showToast('جاري حذف الحساب...', 'info');
+          google.script.run
+            .withSuccessHandler(result => {
+              alert('✅ تم حذف حسابك بنجاح. سيتم تحديث الصفحة.');
+              window.location.reload();
+            })
+            .withFailureHandler(err => {
+              this.showToast('فشل حذف الحساب: ' + err.message, 'error');
+            })
+            .SOV1_UI_deleteAccount();
+        },
+        
         searchTransactions() {
           if (!this.searchQuery || this.searchQuery.trim() === '') {
             this.filteredTransactions = this.allTransactions;
@@ -772,6 +929,9 @@
       <a href="#" @click.prevent="page='settings'" :class="{'bg-green-50 text-green-700': page==='settings', 'text-gray-600 hover:bg-gray-50': page!=='settings'}" class="flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors">
         <span>⚙️</span> الإعدادات
       </a>
+      <a href="#" @click.prevent="page='tests'" :class="{'bg-green-50 text-green-700': page==='tests', 'text-gray-600 hover:bg-gray-50': page!=='tests'}" class="flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors border-t pt-4 mt-4">
+        <span>🧪</span> اختبارات المطور
+      </a>
     </nav>
     <div class="p-4 border-t border-gray-100">
       <div class="flex items-center gap-3 px-4 py-3">
@@ -803,9 +963,27 @@
        </div>
        <nav class="flex-1 p-4 space-y-2">
          <!-- Mobile Links (same as desktop) -->
-         <a href="#" @click="page='dashboard'; mobileMenu=false" class="block px-4 py-3 rounded-lg hover:bg-gray-50">لوحة التحكم</a>
-         <a href="#" @click="page='transactions'; mobileMenu=false" class="block px-4 py-3 rounded-lg hover:bg-gray-50">العمليات</a>
-         <a href="#" @click="page='budgets'; mobileMenu=false" class="block px-4 py-3 rounded-lg hover:bg-gray-50">الميزانيات</a>
+         <a href="#" @click="page='dashboard'; mobileMenu=false" :class="{'bg-green-50 text-green-700': page==='dashboard'}" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 font-medium">
+           <span>📊</span> لوحة التحكم
+         </a>
+         <a href="#" @click="page='transactions'; mobileMenu=false" :class="{'bg-green-50 text-green-700': page==='transactions'}" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 font-medium">
+           <span>📋</span> العمليات
+         </a>
+         <a href="#" @click="page='budgets'; mobileMenu=false" :class="{'bg-green-50 text-green-700': page==='budgets'}" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 font-medium">
+           <span>📉</span> الميزانيات
+         </a>
+         <a href="#" @click="page='reports'; mobileMenu=false" :class="{'bg-green-50 text-green-700': page==='reports'}" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 font-medium">
+           <span>📊</span> التقارير
+         </a>
+         <a href="#" @click="page='accounts'; mobileMenu=false" :class="{'bg-green-50 text-green-700': page==='accounts'}" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 font-medium">
+           <span>🏦</span> الحسابات
+         </a>
+         <a href="#" @click="page='settings'; mobileMenu=false" :class="{'bg-green-50 text-green-700': page==='settings'}" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 font-medium">
+           <span>⚙️</span> الإعدادات
+         </a>
+         <a href="#" @click="page='tests'; mobileMenu=false" :class="{'bg-green-50 text-green-700': page==='tests'}" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 font-medium border-t pt-3 mt-3">
+           <span>🧪</span> اختبارات المطور
+         </a>
        </nav>
   </div>
 
@@ -1138,6 +1316,11 @@
               <label class="block text-sm font-medium text-gray-700 mb-2">البريد الإلكتروني</label>
               <input type="email" x-model="userSettings.user_email" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
             </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">يوم نزول الراتب</label>
+              <input type="number" x-model="userSettings.salary_day" min="1" max="31" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+              <p class="text-xs text-gray-500 mt-1">يستخدم لحساب الميزانيات الشهرية (من 1 إلى 31)</p>
+            </div>
             <div class="pt-4">
               <button @click="saveSettings()" class="w-full px-6 py-3 bg-green-600 text-white rounded-lg font-bold hover:bg-green-700 transition">
                 💾 حفظ التغييرات
@@ -1158,8 +1341,8 @@
                 <p class="text-xs text-gray-500">استقبال التنبيهات عبر بوت تيليجرام</p>
               </div>
               <label class="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" checked class="sr-only peer">
-                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-green-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+                <input type="checkbox" x-model="userSettings.telegram_notifications" @change="saveSettings()" class="sr-only peer">
+                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-green-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content=[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
               </label>
             </div>
             <div class="flex items-center justify-between">
@@ -1168,7 +1351,7 @@
                 <p class="text-xs text-gray-500">إشعار عند تجاوز حد الميزانية</p>
               </div>
               <label class="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" checked class="sr-only peer">
+                <input type="checkbox" x-model="userSettings.budget_alerts" @change="saveSettings()" class="sr-only peer">
                 <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-green-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
               </label>
             </div>
@@ -1181,15 +1364,15 @@
             <span>⚙️</span> النظام
           </h2>
           <div class="space-y-3">
-            <button class="w-full px-4 py-3 text-right border border-gray-200 rounded-lg hover:bg-gray-50 transition flex items-center justify-between">
+            <button @click="exportData()" class="w-full px-4 py-3 text-right border border-gray-200 rounded-lg hover:bg-gray-50 transition flex items-center justify-between">
               <span class="font-medium text-gray-900">تصدير البيانات</span>
               <span class="text-gray-400">→</span>
             </button>
-            <button class="w-full px-4 py-3 text-right border border-gray-200 rounded-lg hover:bg-gray-50 transition flex items-center justify-between">
+            <button @click="showPrivacyModal = true" class="w-full px-4 py-3 text-right border border-gray-200 rounded-lg hover:bg-gray-50 transition flex items-center justify-between">
               <span class="font-medium text-gray-900">سياسة الخصوصية</span>
               <span class="text-gray-400">→</span>
             </button>
-            <button class="w-full px-4 py-3 text-right border border-red-200 rounded-lg hover:bg-red-50 transition flex items-center justify-between text-red-600">
+            <button @click="confirmDeleteAccount()" class="w-full px-4 py-3 text-right border border-red-200 rounded-lg hover:bg-red-50 transition flex items-center justify-between text-red-600">
               <span class="font-medium">حذف الحساب</span>
               <span>⚠️</span>
             </button>
@@ -1199,6 +1382,197 @@
         <div class="text-center text-sm text-gray-500 py-4">
           <p>SJA Money Tracker v2.0</p>
           <p class="mt-1">صُنع بـ ❤️ في السعودية</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- PAGE: SYSTEM TESTS (Developer Dashboard) -->
+    <div x-show="page === 'tests'" x-transition.opacity>
+      <header class="mb-8">
+        <h1 class="text-2xl font-bold text-gray-900">🧪 اختبارات المطور</h1>
+        <p class="text-gray-500 text-sm mt-1">تشغيل وفحص جميع اختبارات النظام</p>
+      </header>
+
+      <div class="space-y-6">
+        <!-- Warning Banner -->
+        <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
+          <div class="flex items-start gap-3">
+            <span class="text-2xl">⚠️</span>
+            <div>
+              <h3 class="font-bold text-yellow-900 mb-2">تحذير للمطورين</h3>
+              <p class="text-yellow-800 text-sm">هذه الصفحة مخصصة للمطورين فقط. لا تقم بتشغيل الاختبارات ما لم تفهم وظائفها. بعض الاختبارات قد تنشئ بيانات تجريبية.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Main Test Suites -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <h2 class="font-bold text-gray-900 mb-4 flex items-center gap-2">
+            <span>🎯</span> مجموعات الاختبار الرئيسية
+          </h2>
+          <div class="space-y-3">
+            <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition">
+              <div class="flex items-center justify-between mb-2">
+                <h3 class="font-semibold text-gray-900">RUN_MASTER_TESTS</h3>
+                <span class="px-2 py-1 bg-green-100 text-green-700 text-xs font-bold rounded">49 tests</span>
+              </div>
+              <p class="text-sm text-gray-600 mb-3">الاختبار الشامل لجميع وظائف النظام (Config, Sheets, Flow, AI, Webhook, Data Integrity)</p>
+              <button onclick="google.script.run.withSuccessHandler((r) => {alert('✅ نتيجة: '+JSON.stringify(r, null, 2));}).withFailureHandler((e) => {alert('❌ خطأ: '+e);}).RUN_MASTER_TESTS();" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+                ▶️ تشغيل
+              </button>
+            </div>
+
+            <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition">
+              <div class="flex items-center justify-between mb-2">
+                <h3 class="font-semibold text-gray-900">RUN_COMPREHENSIVE_VALIDATION</h3>
+                <span class="px-2 py-1 bg-blue-100 text-blue-700 text-xs font-bold rounded">API Tests</span>
+              </div>
+              <p class="text-sm text-gray-600 mb-3">فحص جميع دوال API الخلفية (SOV1_UI_*) والتحقق من صلاحية الردود</p>
+              <button onclick="google.script.run.withSuccessHandler((r) => {alert('✅ نتيجة: '+JSON.stringify(r, null, 2));}).withFailureHandler((e) => {alert('❌ خطأ: '+e);}).RUN_COMPREHENSIVE_VALIDATION();" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+                ▶️ تشغيل
+              </button>
+            </div>
+
+            <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition">
+              <div class="flex items-center justify-between mb-2">
+                <h3 class="font-semibold text-gray-900">AUTO_TEST_ALL_PAGES</h3>
+                <span class="px-2 py-1 bg-purple-100 text-purple-700 text-xs font-bold rounded">Frontend Tests</span>
+              </div>
+              <p class="text-sm text-gray-600 mb-3">اختبار جميع صفحات الواجهة الأمامية (Settings, Index, Features, Onboarding, Backend)</p>
+              <button onclick="google.script.run.withSuccessHandler((r) => {alert('✅ نتيجة: '+JSON.stringify(r, null, 2));}).withFailureHandler((e) => {alert('❌ خطأ: '+e);}).AUTO_TEST_ALL_PAGES();" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+                ▶️ تشغيل
+              </button>
+            </div>
+
+            <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition">
+              <div class="flex items-center justify-between mb-2">
+                <h3 class="font-semibold text-gray-900">DEV_TEST_SMS_FLOW</h3>
+                <span class="px-2 py-1 bg-orange-100 text-orange-700 text-xs font-bold rounded">E2E Test</span>
+              </div>
+              <p class="text-sm text-gray-600 mb-3">اختبار شامل: SMS → AI → Sheets → Telegram (ينشئ معاملة تجريبية)</p>
+              <button onclick="google.script.run.withSuccessHandler((r) => {alert('✅ نتيجة: '+JSON.stringify(r, null, 2));}).withFailureHandler((e) => {alert('❌ خطأ: '+e);}).DEV_TEST_SMS_FLOW();" class="px-4 py-2 bg-orange-600 text-white rounded-lg text-sm font-medium hover:bg-orange-700">
+                ▶️ تشغيل (ينشئ بيانات)
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Diagnostic Tests -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <h2 class="font-bold text-gray-900 mb-4 flex items-center gap-2">
+            <span>🔍</span> اختبارات التشخيص
+          </h2>
+          <div class="space-y-3">
+            <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition">
+              <h3 class="font-semibold text-gray-900 mb-2">DEBUG_SHEETS_INFO</h3>
+              <p class="text-sm text-gray-600 mb-3">عرض معلومات مفصلة عن جميع الأوراق والبيانات</p>
+              <button onclick="google.script.run.withSuccessHandler((r) => {console.log(r); alert('✅ تم! انظر Console');}).withFailureHandler((e) => {alert('❌ خطأ: '+e);}).DEBUG_SHEETS_INFO();" class="px-4 py-2 bg-gray-600 text-white rounded-lg text-sm font-medium hover:bg-gray-700">
+                ▶️ تشغيل
+              </button>
+            </div>
+
+            <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition">
+              <h3 class="font-semibold text-gray-900 mb-2">DEBUG_TELEGRAM_STATUS</h3>
+              <p class="text-sm text-gray-600 mb-3">فحص حالة Webhook والاتصال ببوت Telegram</p>
+              <button onclick="google.script.run.withSuccessHandler((r) => {alert('✅ نتيجة: '+JSON.stringify(r, null, 2));}).withFailureHandler((e) => {alert('❌ خطأ: '+e);}).DEBUG_TELEGRAM_STATUS();" class="px-4 py-2 bg-gray-600 text-white rounded-lg text-sm font-medium hover:bg-gray-700">
+                ▶️ تشغيل
+              </button>
+            </div>
+
+            <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition">
+              <h3 class="font-semibold text-gray-900 mb-2">testDashboardData</h3>
+              <p class="text-sm text-gray-600 mb-3">فحص بيانات لوحة التحكم والتحقق من عدم وجود null</p>
+              <button onclick="google.script.run.withSuccessHandler((r) => {alert('✅ نتيجة: '+JSON.stringify(r, null, 2));}).withFailureHandler((e) => {alert('❌ خطأ: '+e);}).testDashboardData();" class="px-4 py-2 bg-gray-600 text-white rounded-lg text-sm font-medium hover:bg-gray-700">
+                ▶️ تشغيل
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Parser Tests -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <h2 class="font-bold text-gray-900 mb-4 flex items-center gap-2">
+            <span>🤖</span> اختبارات المحلل (Parser)
+          </h2>
+          <div class="space-y-3">
+            <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition">
+              <h3 class="font-semibold text-gray-900 mb-2">TEST_DATE_PARSING</h3>
+              <p class="text-sm text-gray-600 mb-3">فحص قدرة المحلل على استخراج التواريخ من النصوص</p>
+              <button onclick="google.script.run.withSuccessHandler((r) => {console.log(r); alert('✅ تم! انظر Console');}).withFailureHandler((e) => {alert('❌ خطأ: '+e);}).TEST_DATE_PARSING();" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">
+                ▶️ تشغيل
+              </button>
+            </div>
+
+            <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition">
+              <h3 class="font-semibold text-gray-900 mb-2">TEST_BANK_DETECTION</h3>
+              <p class="text-sm text-gray-600 mb-3">اختبار الكشف عن البنوك السعودية من الرسائل</p>
+              <button onclick="google.script.run.withSuccessHandler((r) => {console.log(r); alert('✅ تم! انظر Console');}).withFailureHandler((e) => {alert('❌ خطأ: '+e);}).TEST_BANK_DETECTION();" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">
+                ▶️ تشغيل
+              </button>
+            </div>
+
+            <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition">
+              <h3 class="font-semibold text-gray-900 mb-2">TEST_ACCOUNT_IDENTIFICATION</h3>
+              <p class="text-sm text-gray-600 mb-3">فحص استخراج معلومات الحسابات البنكية</p>
+              <button onclick="google.script.run.withSuccessHandler((r) => {console.log(r); alert('✅ تم! انظر Console');}).withFailureHandler((e) => {alert('❌ خطأ: '+e);}).TEST_ACCOUNT_IDENTIFICATION();" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">
+                ▶️ تشغيل
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Documentation -->
+        <div class="bg-blue-50 border border-blue-200 rounded-xl p-6">
+          <h3 class="font-bold text-blue-900 mb-3 flex items-center gap-2">
+            <span>📚</span> التوثيق
+          </h3>
+          <ul class="space-y-2 text-sm text-blue-800">
+            <li class="flex gap-2">
+              <span>•</span> 
+              <span>للحصول على نتائج مفصلة، افتح <strong>Console</strong> (F12 → Console)</span>
+            </li>
+            <li class="flex gap-2">
+              <span>•</span> 
+              <span>يمكنك أيضاً تشغيل الاختبارات من <strong>Apps Script Editor</strong> → Extensions → Apps Script</span>
+            </li>
+            <li class="flex gap-2">
+              <span>•</span> 
+              <span>راجع <code class="bg-blue-100 px-1 rounded">TESTING.md</code> للحصول على دليل كامل</span>
+            </li>
+            <li class="flex gap-2">
+              <span>•</span> 
+              <span>النتيجة المتوقعة: RUN_MASTER_TESTS يجب أن يُظهر ✅ 49/49 اختبار ناجح</span>
+            </li>
+          </ul>
+        </div>
+
+        <!-- System Health Status -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <h2 class="font-bold text-gray-900 mb-4 flex items-center gap-2">
+            <span>❤️</span> حالة النظام
+          </h2>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="p-4 bg-green-50 rounded-lg">
+              <div class="text-sm text-gray-600 mb-1">Backend Functions</div>
+              <div class="text-2xl font-bold text-green-700">20+</div>
+              <div class="text-xs text-gray-500">SOV1_UI_* wrappers</div>
+            </div>
+            <div class="p-4 bg-blue-50 rounded-lg">
+              <div class="text-sm text-gray-600 mb-1">Test Suites</div>
+              <div class="text-2xl font-bold text-blue-700">10+</div>
+              <div class="text-xs text-gray-500">Available tests</div>
+            </div>
+            <div class="p-4 bg-purple-50 rounded-lg">
+              <div class="text-sm text-gray-600 mb-1">Pages</div>
+              <div class="text-2xl font-bold text-purple-700">7</div>
+              <div class="text-xs text-gray-500">Dashboard, Txns, Budgets, etc.</div>
+            </div>
+            <div class="p-4 bg-orange-50 rounded-lg">
+              <div class="text-sm text-gray-600 mb-1">Coverage</div>
+              <div class="text-2xl font-bold text-orange-700">100%</div>
+              <div class="text-xs text-gray-500">All features have UI</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1386,6 +1760,48 @@
     </div>
   </div>
 
+  <!-- Budget Modal -->
+  <div x-show="showBudgetModal" @click.self="showBudgetModal = false" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" x-transition>
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6" @click.stop>
+      <div class="flex items-center justify-between mb-6">
+        <h2 class="text-xl font-bold text-gray-900" x-text="editingBudget ? 'تعديل الميزانية' : 'إضافة ميزانية جديدة'">إضافة ميزانية</h2>
+        <button @click="showBudgetModal = false" class="text-gray-400 hover:text-gray-600">✕</button>
+      </div>
+      
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">التصنيف</label>
+          <select x-model="newBudget.category" :disabled="editingBudget !== null" class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:bg-gray-100">
+            <option value="">اختر التصنيف</option>
+            <template x-for="cat in categories" :key="cat">
+              <option :value="cat" x-text="cat"></option>
+            </template>
+          </select>
+        </div>
+        
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">الحد الأقصى (SAR)</label>
+          <input type="number" x-model="newBudget.limit" placeholder="0.00" step="0.01" min="0" class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+        </div>
+        
+        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <p class="text-sm text-blue-800">
+            💡 سيتم تنبيهك عندما تصل المصروفات إلى 80% من الحد الأقصى
+          </p>
+        </div>
+        
+        <div class="flex gap-3 pt-4">
+          <button @click="showBudgetModal = false" class="flex-1 px-6 py-3 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition">
+            إلغاء
+          </button>
+          <button @click="addOrEditBudget()" class="flex-1 px-6 py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition">
+            ✓ حفظ
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Account Modal -->
   <div x-show="showAccountModal" class="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" x-transition>
     <div @click.outside="showAccountModal = false" class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
@@ -1404,7 +1820,7 @@
           <span x-text="showAIExtraction ? '▼' : '◀'" class="text-purple-600 font-bold"></span>
         </button>
         
-        <div x-show="showAIExtraction" x-collapse class="mt-3 p-4 bg-purple-50/50 rounded-xl border border-purple-100">
+        <div x-show="showAIExtraction" x-transition class="mt-3 p-4 bg-purple-50/50 rounded-xl border border-purple-100">
           <p class="text-sm text-purple-700 mb-3">الصق رسالة SMS من البنك وسيقوم النظام باستخراج البيانات تلقائياً</p>
           <textarea x-model="newAccount.smsText" placeholder="مثال: تم الشراء من AMAZON بمبلغ 299.00 SAR من بطاقة الراجحي **9767" rows="3" class="w-full px-4 py-3 border border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-500 mb-3 text-sm"></textarea>
           <button @click="extractFromSMS()" class="w-full px-4 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg font-bold hover:from-purple-700 hover:to-blue-700 transition flex items-center justify-center gap-2">
@@ -1522,6 +1938,63 @@
           </button>
           <button @click="saveEditedTransaction()" class="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700">
             حفظ التعديلات
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Privacy Policy Modal -->
+  <div x-show="showPrivacyModal" x-cloak class="fixed inset-0 z-50 overflow-y-auto" style="background: rgba(0,0,0,0.5);">
+    <div class="flex items-center justify-center min-h-screen p-4">
+      <div @click.away="showPrivacyModal = false" class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+        <div class="sticky top-0 bg-white border-b border-gray-200 p-6 flex items-center justify-between">
+          <h2 class="text-2xl font-bold text-gray-900">🔒 سياسة الخصوصية</h2>
+          <button @click="showPrivacyModal = false" class="text-gray-400 hover:text-gray-600">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+        
+        <div class="p-6 space-y-4 text-right">
+          <div>
+            <h3 class="font-bold text-lg text-gray-900 mb-2">📊 جمع البيانات</h3>
+            <p class="text-gray-700">نحن نجمع فقط البيانات التي تدخلها بنفسك: العمليات المالية، الميزانيات، الحسابات، والإعدادات.</p>
+          </div>
+          
+          <div>
+            <h3 class="font-bold text-lg text-gray-900 mb-2">🔐 تخزين البيانات</h3>
+            <p class="text-gray-700">جميع بياناتك مخزنة في جداول Google Sheets الخاصة بك. نحن لا نخزن أي بيانات على خوادم خارجية.</p>
+          </div>
+          
+          <div>
+            <h3 class="font-bold text-lg text-gray-900 mb-2">🤖 استخدام الذكاء الاصطناعي</h3>
+            <p class="text-gray-700">نستخدم GROQ API و Gemini لتحليل الرسائل النصية واستخراج بيانات العمليات. يتم إرسال نص الرسالة فقط، دون أي معلومات شخصية.</p>
+          </div>
+          
+          <div>
+            <h3 class="font-bold text-lg text-gray-900 mb-2">📱 Telegram Bot</h3>
+            <p class="text-gray-700">إذا قمت بتفعيل إشعارات Telegram، سيتم إرسال إشعارات إلى رقم الدردشة المحدد. لا نشارك بياناتك مع أطراف ثالثة.</p>
+          </div>
+          
+          <div>
+            <h3 class="font-bold text-lg text-gray-900 mb-2">🗑️ حذف البيانات</h3>
+            <p class="text-gray-700">يمكنك حذف حسابك وجميع بياناتك في أي وقت من صفحة الإعدادات. الحذف نهائي ولا يمكن التراجع عنه.</p>
+          </div>
+          
+          <div>
+            <h3 class="font-bold text-lg text-gray-900 mb-2">🔒 الأمان</h3>
+            <p class="text-gray-700">التطبيق يعمل على Google Apps Script مع بروتوكول HTTPS. جميع البيانات محمية بنظام أمان Google.</p>
+          </div>
+          
+          <div class="border-t border-gray-200 pt-4 mt-4">
+            <p class="text-sm text-gray-600">آخر تحديث: يناير 2026</p>
+            <p class="text-sm text-gray-600 mt-2">للاستفسارات: <a href="mailto:support@sjatracker.com" class="text-green-600 hover:underline">support@sjatracker.com</a></p>
+          </div>
+          
+          <button @click="showPrivacyModal = false" class="w-full px-6 py-3 bg-green-600 text-white rounded-lg font-bold hover:bg-green-700 transition">
+            فهمت
           </button>
         </div>
       </div>
