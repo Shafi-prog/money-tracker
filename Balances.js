@@ -52,6 +52,33 @@ function applyTxnToBalance_(accountKey, amount, isIncoming) {
 }
 
 /**
+ * الحصول على جميع أرصدة الحسابات
+ * @returns {Array} مصفوفة من الحسابات مع أرصدتها
+ */
+function getAllBalances_() {
+  var sh = ensureBalancesSheet_();
+  var data = sh.getDataRange().getValues();
+  var balances = [];
+  
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][0]) {
+      balances.push({
+        account: String(data[i][0] || ''),
+        balance: Number(data[i][1] || 0),
+        lastUpdate: data[i][2] || null
+      });
+    }
+  }
+  
+  // ترتيب حسب الرصيد من الأعلى للأقل
+  balances.sort(function(a, b) {
+    return b.balance - a.balance;
+  });
+  
+  return balances;
+}
+
+/**
  * إشعار المتبقي للحساب الأساسي (مثلاً الراجحي 9767)
  */
 function notifyPrimaryBalance_(accountKey, newBalance, contextText) {

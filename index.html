@@ -929,9 +929,6 @@
       <a href="#" @click.prevent="page='settings'" :class="{'bg-green-50 text-green-700': page==='settings', 'text-gray-600 hover:bg-gray-50': page!=='settings'}" class="flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors">
         <span>⚙️</span> الإعدادات
       </a>
-      <a href="#" @click.prevent="page='tests'" :class="{'bg-green-50 text-green-700': page==='tests', 'text-gray-600 hover:bg-gray-50': page!=='tests'}" class="flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors border-t pt-4 mt-4">
-        <span>🧪</span> اختبارات المطور
-      </a>
     </nav>
     <div class="p-4 border-t border-gray-100">
       <div class="flex items-center gap-3 px-4 py-3">
@@ -980,9 +977,6 @@
          </a>
          <a href="#" @click="page='settings'; mobileMenu=false" :class="{'bg-green-50 text-green-700': page==='settings'}" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 font-medium">
            <span>⚙️</span> الإعدادات
-         </a>
-         <a href="#" @click="page='tests'; mobileMenu=false" :class="{'bg-green-50 text-green-700': page==='tests'}" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 font-medium border-t pt-3 mt-3">
-           <span>🧪</span> اختبارات المطور
          </a>
        </nav>
   </div>
@@ -1382,197 +1376,6 @@
         <div class="text-center text-sm text-gray-500 py-4">
           <p>SJA Money Tracker v2.0</p>
           <p class="mt-1">صُنع بـ ❤️ في السعودية</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- PAGE: SYSTEM TESTS (Developer Dashboard) -->
-    <div x-show="page === 'tests'" x-transition.opacity>
-      <header class="mb-8">
-        <h1 class="text-2xl font-bold text-gray-900">🧪 اختبارات المطور</h1>
-        <p class="text-gray-500 text-sm mt-1">تشغيل وفحص جميع اختبارات النظام</p>
-      </header>
-
-      <div class="space-y-6">
-        <!-- Warning Banner -->
-        <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
-          <div class="flex items-start gap-3">
-            <span class="text-2xl">⚠️</span>
-            <div>
-              <h3 class="font-bold text-yellow-900 mb-2">تحذير للمطورين</h3>
-              <p class="text-yellow-800 text-sm">هذه الصفحة مخصصة للمطورين فقط. لا تقم بتشغيل الاختبارات ما لم تفهم وظائفها. بعض الاختبارات قد تنشئ بيانات تجريبية.</p>
-            </div>
-          </div>
-        </div>
-
-        <!-- Main Test Suites -->
-        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-          <h2 class="font-bold text-gray-900 mb-4 flex items-center gap-2">
-            <span>🎯</span> مجموعات الاختبار الرئيسية
-          </h2>
-          <div class="space-y-3">
-            <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition">
-              <div class="flex items-center justify-between mb-2">
-                <h3 class="font-semibold text-gray-900">RUN_MASTER_TESTS</h3>
-                <span class="px-2 py-1 bg-green-100 text-green-700 text-xs font-bold rounded">49 tests</span>
-              </div>
-              <p class="text-sm text-gray-600 mb-3">الاختبار الشامل لجميع وظائف النظام (Config, Sheets, Flow, AI, Webhook, Data Integrity)</p>
-              <button onclick="google.script.run.withSuccessHandler((r) => {alert('✅ نتيجة: '+JSON.stringify(r, null, 2));}).withFailureHandler((e) => {alert('❌ خطأ: '+e);}).RUN_MASTER_TESTS();" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
-                ▶️ تشغيل
-              </button>
-            </div>
-
-            <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition">
-              <div class="flex items-center justify-between mb-2">
-                <h3 class="font-semibold text-gray-900">RUN_COMPREHENSIVE_VALIDATION</h3>
-                <span class="px-2 py-1 bg-blue-100 text-blue-700 text-xs font-bold rounded">API Tests</span>
-              </div>
-              <p class="text-sm text-gray-600 mb-3">فحص جميع دوال API الخلفية (SOV1_UI_*) والتحقق من صلاحية الردود</p>
-              <button onclick="google.script.run.withSuccessHandler((r) => {alert('✅ نتيجة: '+JSON.stringify(r, null, 2));}).withFailureHandler((e) => {alert('❌ خطأ: '+e);}).RUN_COMPREHENSIVE_VALIDATION();" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
-                ▶️ تشغيل
-              </button>
-            </div>
-
-            <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition">
-              <div class="flex items-center justify-between mb-2">
-                <h3 class="font-semibold text-gray-900">AUTO_TEST_ALL_PAGES</h3>
-                <span class="px-2 py-1 bg-purple-100 text-purple-700 text-xs font-bold rounded">Frontend Tests</span>
-              </div>
-              <p class="text-sm text-gray-600 mb-3">اختبار جميع صفحات الواجهة الأمامية (Settings, Index, Features, Onboarding, Backend)</p>
-              <button onclick="google.script.run.withSuccessHandler((r) => {alert('✅ نتيجة: '+JSON.stringify(r, null, 2));}).withFailureHandler((e) => {alert('❌ خطأ: '+e);}).AUTO_TEST_ALL_PAGES();" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
-                ▶️ تشغيل
-              </button>
-            </div>
-
-            <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition">
-              <div class="flex items-center justify-between mb-2">
-                <h3 class="font-semibold text-gray-900">DEV_TEST_SMS_FLOW</h3>
-                <span class="px-2 py-1 bg-orange-100 text-orange-700 text-xs font-bold rounded">E2E Test</span>
-              </div>
-              <p class="text-sm text-gray-600 mb-3">اختبار شامل: SMS → AI → Sheets → Telegram (ينشئ معاملة تجريبية)</p>
-              <button onclick="google.script.run.withSuccessHandler((r) => {alert('✅ نتيجة: '+JSON.stringify(r, null, 2));}).withFailureHandler((e) => {alert('❌ خطأ: '+e);}).DEV_TEST_SMS_FLOW();" class="px-4 py-2 bg-orange-600 text-white rounded-lg text-sm font-medium hover:bg-orange-700">
-                ▶️ تشغيل (ينشئ بيانات)
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Diagnostic Tests -->
-        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-          <h2 class="font-bold text-gray-900 mb-4 flex items-center gap-2">
-            <span>🔍</span> اختبارات التشخيص
-          </h2>
-          <div class="space-y-3">
-            <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition">
-              <h3 class="font-semibold text-gray-900 mb-2">DEBUG_SHEETS_INFO</h3>
-              <p class="text-sm text-gray-600 mb-3">عرض معلومات مفصلة عن جميع الأوراق والبيانات</p>
-              <button onclick="google.script.run.withSuccessHandler((r) => {console.log(r); alert('✅ تم! انظر Console');}).withFailureHandler((e) => {alert('❌ خطأ: '+e);}).DEBUG_SHEETS_INFO();" class="px-4 py-2 bg-gray-600 text-white rounded-lg text-sm font-medium hover:bg-gray-700">
-                ▶️ تشغيل
-              </button>
-            </div>
-
-            <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition">
-              <h3 class="font-semibold text-gray-900 mb-2">DEBUG_TELEGRAM_STATUS</h3>
-              <p class="text-sm text-gray-600 mb-3">فحص حالة Webhook والاتصال ببوت Telegram</p>
-              <button onclick="google.script.run.withSuccessHandler((r) => {alert('✅ نتيجة: '+JSON.stringify(r, null, 2));}).withFailureHandler((e) => {alert('❌ خطأ: '+e);}).DEBUG_TELEGRAM_STATUS();" class="px-4 py-2 bg-gray-600 text-white rounded-lg text-sm font-medium hover:bg-gray-700">
-                ▶️ تشغيل
-              </button>
-            </div>
-
-            <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition">
-              <h3 class="font-semibold text-gray-900 mb-2">testDashboardData</h3>
-              <p class="text-sm text-gray-600 mb-3">فحص بيانات لوحة التحكم والتحقق من عدم وجود null</p>
-              <button onclick="google.script.run.withSuccessHandler((r) => {alert('✅ نتيجة: '+JSON.stringify(r, null, 2));}).withFailureHandler((e) => {alert('❌ خطأ: '+e);}).testDashboardData();" class="px-4 py-2 bg-gray-600 text-white rounded-lg text-sm font-medium hover:bg-gray-700">
-                ▶️ تشغيل
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Parser Tests -->
-        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-          <h2 class="font-bold text-gray-900 mb-4 flex items-center gap-2">
-            <span>🤖</span> اختبارات المحلل (Parser)
-          </h2>
-          <div class="space-y-3">
-            <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition">
-              <h3 class="font-semibold text-gray-900 mb-2">TEST_DATE_PARSING</h3>
-              <p class="text-sm text-gray-600 mb-3">فحص قدرة المحلل على استخراج التواريخ من النصوص</p>
-              <button onclick="google.script.run.withSuccessHandler((r) => {console.log(r); alert('✅ تم! انظر Console');}).withFailureHandler((e) => {alert('❌ خطأ: '+e);}).TEST_DATE_PARSING();" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">
-                ▶️ تشغيل
-              </button>
-            </div>
-
-            <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition">
-              <h3 class="font-semibold text-gray-900 mb-2">TEST_BANK_DETECTION</h3>
-              <p class="text-sm text-gray-600 mb-3">اختبار الكشف عن البنوك السعودية من الرسائل</p>
-              <button onclick="google.script.run.withSuccessHandler((r) => {console.log(r); alert('✅ تم! انظر Console');}).withFailureHandler((e) => {alert('❌ خطأ: '+e);}).TEST_BANK_DETECTION();" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">
-                ▶️ تشغيل
-              </button>
-            </div>
-
-            <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition">
-              <h3 class="font-semibold text-gray-900 mb-2">TEST_ACCOUNT_IDENTIFICATION</h3>
-              <p class="text-sm text-gray-600 mb-3">فحص استخراج معلومات الحسابات البنكية</p>
-              <button onclick="google.script.run.withSuccessHandler((r) => {console.log(r); alert('✅ تم! انظر Console');}).withFailureHandler((e) => {alert('❌ خطأ: '+e);}).TEST_ACCOUNT_IDENTIFICATION();" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">
-                ▶️ تشغيل
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Documentation -->
-        <div class="bg-blue-50 border border-blue-200 rounded-xl p-6">
-          <h3 class="font-bold text-blue-900 mb-3 flex items-center gap-2">
-            <span>📚</span> التوثيق
-          </h3>
-          <ul class="space-y-2 text-sm text-blue-800">
-            <li class="flex gap-2">
-              <span>•</span> 
-              <span>للحصول على نتائج مفصلة، افتح <strong>Console</strong> (F12 → Console)</span>
-            </li>
-            <li class="flex gap-2">
-              <span>•</span> 
-              <span>يمكنك أيضاً تشغيل الاختبارات من <strong>Apps Script Editor</strong> → Extensions → Apps Script</span>
-            </li>
-            <li class="flex gap-2">
-              <span>•</span> 
-              <span>راجع <code class="bg-blue-100 px-1 rounded">TESTING.md</code> للحصول على دليل كامل</span>
-            </li>
-            <li class="flex gap-2">
-              <span>•</span> 
-              <span>النتيجة المتوقعة: RUN_MASTER_TESTS يجب أن يُظهر ✅ 49/49 اختبار ناجح</span>
-            </li>
-          </ul>
-        </div>
-
-        <!-- System Health Status -->
-        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-          <h2 class="font-bold text-gray-900 mb-4 flex items-center gap-2">
-            <span>❤️</span> حالة النظام
-          </h2>
-          <div class="grid grid-cols-2 gap-4">
-            <div class="p-4 bg-green-50 rounded-lg">
-              <div class="text-sm text-gray-600 mb-1">Backend Functions</div>
-              <div class="text-2xl font-bold text-green-700">20+</div>
-              <div class="text-xs text-gray-500">SOV1_UI_* wrappers</div>
-            </div>
-            <div class="p-4 bg-blue-50 rounded-lg">
-              <div class="text-sm text-gray-600 mb-1">Test Suites</div>
-              <div class="text-2xl font-bold text-blue-700">10+</div>
-              <div class="text-xs text-gray-500">Available tests</div>
-            </div>
-            <div class="p-4 bg-purple-50 rounded-lg">
-              <div class="text-sm text-gray-600 mb-1">Pages</div>
-              <div class="text-2xl font-bold text-purple-700">7</div>
-              <div class="text-xs text-gray-500">Dashboard, Txns, Budgets, etc.</div>
-            </div>
-            <div class="p-4 bg-orange-50 rounded-lg">
-              <div class="text-sm text-gray-600 mb-1">Coverage</div>
-              <div class="text-2xl font-bold text-orange-700">100%</div>
-              <div class="text-xs text-gray-500">All features have UI</div>
-            </div>
-          </div>
         </div>
       </div>
     </div>
