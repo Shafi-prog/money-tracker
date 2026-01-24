@@ -365,6 +365,16 @@ function sendSovereignReportV120(ai, sync, src, raw, destChatId) {
   html += '━━━━━━━━━━━━━━\n' +
     '📝 <b>النص الأصلي:</b>\n<pre>' + escHtml_(String(raw || '').slice(0, 150)) + '</pre>';
 
+  // إضافة أرصدة جميع الحسابات
+  if (typeof getAllBalancesHTML_ === 'function') {
+    try {
+      var balancesHTML = getAllBalancesHTML_();
+      if (balancesHTML) html += balancesHTML;
+    } catch (balErr) {
+      Logger.log('Error getting balances: ' + balErr);
+    }
+  }
+
   // إرسال مع أزرار التعديل والحذف
   var keyboard = null;
   var actionsMode = String(ENV.TG_ACTIONS_MODE || 'admin').toLowerCase();
@@ -499,4 +509,46 @@ function addManualTransaction_(chatId, payload) {
 /** ===== آخر N معاملات ===== */
 function sendLastNTransactions_(chatId, n) {
   sendLastNToTelegram_(chatId, n);
+}
+
+/** ===== إرسال أرصدة جميع الحسابات ===== */
+function sendAllBalancesToTelegram_(chatId) {
+  chatId = String(chatId || getHubChatId_());
+  if (!chatId) return;
+  
+  if (typeof ensureBalancesSheet_ !== 'function') {
+    sendTelegram_(chatId, '⚠️ وظيفة الأرصدة غير متاحة.');
+    return;
+  }
+  
+  var sh = ensureBalancesSheet_();
+  var data = sh.getDataRange().getValues();
+  
+  if (data.length < 2) {
+    sendTelegram_(chatId, '📊 لا توجد أرصدة مسجلة بعد.\n\nسيتم تسجيل الأرصدة تلقائياً عند معالجة العمليات.');
+    return;
+  }
+  
+  var html = '<b>💳 الأرصدة الحالية (تقديرية)</b>\n━━━━━━━━━━━━━━\n\n';
+  var total = 0;
+  
+  for (var i = 1; i < data.length; i++) {
+    var accountName = String(data[i][0] || '');
+    var balance = Number(data[i][1] || 0);
+    var lastUpdate = data[i][2];
+    total += balance;
+    
+    var emoji = balance >= 0 ? '💚' : '🔴';
+    var dateStr = '';
+    if (lastUpdate instanceof Date) {
+      dateStr = ' <i>(' + Utilities.formatDate(lastUpdate, Session.getScriptTimeZone(), 'MM/dd HH:mm') + ')</i>';
+    }
+    
+    html += emoji + ' <b>' + escHtml_(accountName) + ':</b> ' + balance.toFixed(2) + ' SAR' + dateStr + '\n';
+  }
+  
+  html += '\n━━━━━━━━━━━━━━\n';
+  html += '<b>💰 الإجمالي:</b> ' + total.toFixed(2) + ' SAR';
+  
+  sendTelegramLogged_(chatId, html, { parse_mode: 'HTML' });
 }

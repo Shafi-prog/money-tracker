@@ -140,7 +140,16 @@ function insertTransaction_(data, source, raw) {
     debtResult = insertDebtEntry_(sDebt, data, uuid, now);
   }
   
-  // 5️⃣ تحديث الفهرس في Cache
+  // 5️⃣ تحديث رصيد الحساب
+  var accountBalance = 0;
+  if (data.accNum || data.cardNum) {
+    var accountKey = data.accNum || data.cardNum || 'default';
+    if (typeof applyTxnToBalance_ === 'function') {
+      accountBalance = applyTxnToBalance_(accountKey, data.amount, data.isIncoming);
+    }
+  }
+  
+  // 6️⃣ تحديث الفهرس في Cache
   updateUUIDIndex_(uuid, s1.getLastRow());
   
   return {
@@ -148,7 +157,8 @@ function insertTransaction_(data, source, raw) {
     sheet1Row: s1.getLastRow(),
     budget: budgetResult,
     debt: debtResult,
-    internal: isInternal
+    internal: isInternal,
+    accountBalance: accountBalance
   };
 }
 

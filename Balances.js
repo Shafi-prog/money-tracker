@@ -91,3 +91,31 @@ function notifyPrimaryBalance_(accountKey, newBalance, contextText) {
     (contextText ? ('—\n' + contextText) : '');
   sendTelegram_(hub, msg);
 }
+
+/**
+ * جلب جميع أرصدة الحسابات بصيغة HTML منسقة
+ * @returns {string} - HTML formatted balances
+ */
+function getAllBalancesHTML_() {
+  var sh = ensureBalancesSheet_();
+  var data = sh.getDataRange().getValues();
+  
+  if (data.length < 2) return '';
+  
+  var html = '\n━━━━━━━━━━━━━━\n<b>💳 الأرصدة الحالية (تقديرية)</b>\n';
+  var total = 0;
+  
+  for (var i = 1; i < data.length; i++) {
+    var accountName = String(data[i][0] || '');
+    var balance = Number(data[i][1] || 0);
+    total += balance;
+    
+    var emoji = balance >= 0 ? '💚' : '🔴';
+    html += emoji + ' <b>' + escHtml_(accountName) + ':</b> ' + balance.toFixed(2) + ' SAR\n';
+  }
+  
+  html += '━━━━━━━━━━━━━━\n';
+  html += '<b>💰 الإجمالي:</b> ' + total.toFixed(2) + ' SAR';
+  
+  return html;
+}

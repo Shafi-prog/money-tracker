@@ -583,6 +583,15 @@ function handleTelegramCommand_(chatId, text, msg) {
       if (typeof sendBudgetsSnapshotToTelegram_ === "function") sendBudgetsSnapshotToTelegram_();
       break;
 
+    case '/balances':
+    case '/أرصدة':
+      if (typeof sendAllBalancesToTelegram_ === 'function') {
+        sendAllBalancesToTelegram_(chatId);
+      } else {
+        sendTelegram_(chatId, '⚠️ وظيفة الأرصدة غير متاحة حالياً.');
+      }
+      break;
+
     case '/search':
       if (typeof searchTransactions_ === 'function') {
         var q = text.replace(/^\/search/i, '').trim();
@@ -608,7 +617,10 @@ function handleTelegramCommand_(chatId, text, msg) {
         "/week - تقرير الأسبوع\n" +
         "/month - تقرير الشهر\n" +
         "/last - آخر عملية\n" +
-        "/budgets - ملخص الميزانية\n\n" +
+        "/budgets - ملخص الميزانية\n" +
+        "/balances - أرصدة جميع الحسابات 💳\n" +
+        "/search - بحث في المعاملات\n" +
+        "/add - إضافة معاملة يدوياً\n\n" +
         "💡 <b>لمعالجة رسالة SMS:</b>\n" +
         "فقط الصقها هنا وسيتم معالجتها تلقائياً!"
       );
