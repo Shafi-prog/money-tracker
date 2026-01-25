@@ -10,7 +10,7 @@
  * - Config.gs: _sheet()
  * - Core_Utils.gs: logIngressEvent_(), safeNotify()
  * - Dedup.gs: SOV1_isDuplicatePersistent_(), SOV1_buildFingerprint_() (اختياري)
- * - Flow.gs: executeUniversalFlowV120()
+ * - Flow.gs: processTransaction()
  *****************************************************/
 
 /** إنشاء/تهيئة ورقة الـ Queue */
@@ -101,7 +101,7 @@ function SOV1_processQueueBatch_() {
 
         // المعالجة الثقيلة (موجودة في مشروعك)
         // meta.chatId قد يكون مفيدًا لتوجيه الرد
-        executeUniversalFlowV120(text, source, meta.chatId || null);
+        processTransaction(text, source, meta.chatId || null);
 
         sh.getRange(rowIndex, 5).setValue('OK');
       } catch (err) {

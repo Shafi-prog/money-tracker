@@ -10,6 +10,10 @@ scripts/**
 _archived/**
 **/_archived/**
 
+# Ignore test files (not deployed to GAS)
+_tests/**
+**/_tests/**
+
 # Ignore src folder (reference only - duplicates root files)
 src/**
 **/src/**

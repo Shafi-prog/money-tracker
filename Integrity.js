@@ -127,7 +127,7 @@ function insertTransaction_(data, source, raw) {
   ]);
   
   // 3️⃣ تحديث Budgets (مع ربط UUID)
-  var isInternal = SOV1_isInternalTransfer_(data);
+  var isInternal = isInternalTransfer_(data);
   var budgetResult = { remaining: 0 };
   
   if (!isInternal && data.category) {

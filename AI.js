@@ -1,6 +1,6 @@
 /********** SJA-V1 | AI.js – Hybrid AI Engine (Shafi Jahz Almutiry) **********/
 
-function callAiHybridV120(text) {
+function classifyWithAI(text) {
   var seed = preParseFallback(text);
 
   if (ENV.GROQ_KEY) {
@@ -23,7 +23,10 @@ function callAiHybridV120(text) {
       var content = JSON.parse(resp1.getContentText()).choices[0].message.content;
       var parsed = JSON.parse(content);
       return sanitizeAI(parsed, seed);
-    } catch (e1) { /* ignore */ }
+    } catch (e1) {
+      // ✅ تسجيل الخطأ بدون كشف مفتاح API
+      Logger.log('Groq AI error: ' + (e1.message || 'Unknown error').replace(/Bearer\s+[\w-]+/gi, 'Bearer [HIDDEN]'));
+    }
   }
 
   if (ENV.GEMINI_KEY) {
@@ -42,11 +45,17 @@ function callAiHybridV120(text) {
       var m = rawText.match(/\{[\s\S]*\}/);
       var parsed2 = m ? JSON.parse(m[0]) : {};
       return sanitizeAI(parsed2, seed);
-    } catch (e2) { /* ignore */ }
+    } catch (e2) {
+      // ✅ تسجيل الخطأ بدون كشف مفتاح API
+      Logger.log('Gemini AI error: ' + (e2.message || 'Unknown error').replace(/key=[\w-]+/gi, 'key=[HIDDEN]'));
+    }
   }
 
   return seed;
 }
+
+// Backward compatibility alias
+var callAiHybridV120 = classifyWithAI;
 
 function preParseFallback(text) {
   var t = String(text || '').replace(/\s+/g, ' ');
@@ -149,4 +158,74 @@ function callAiProbe_(text) {
   }
 
   return { ai: seed, engine: 'fallback' };
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// ACCOUNT EXTRACTION FROM SMS (Merged from AI_AccountExtractor.js)
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * Extract account information from SMS using Grok AI
+ */
+function extractAccountFromSMS_(smsText) {
+  try {
+    if (!smsText || smsText.trim().length === 0) {
+      return { success: false, error: 'لا يوجد نص للمعالجة' };
+    }
+    
+    // Check if Grok API is available
+    if (!ENV.GROK_API_KEY) {
+      return { success: false, error: 'Grok API key not configured' };
+    }
+    
+    var prompt = 'أنت خبير في استخراج معلومات الحسابات البنكية من الرسائل النصية.\n\n' +
+      'قم بتحليل هذه الرسالة واستخراج معلومات الحساب البنكي:\n\n' +
+      smsText + '\n\n' +
+      'أعطني JSON بهذا الشكل بالضبط:\n' +
+      '{\n' +
+      '  "name": "اسم مختصر للحساب (مثال: الراجحي 9767)",\n' +
+      '  "type": "بنك أو بطاقة أو محفظة",\n' +
+      '  "number": "آخر 4 أرقام من الحساب أو البطاقة",\n' +
+      '  "bank": "اسم البنك بالإنجليزية (AlrajhiBank, STC, etc)",\n' +
+      '  "aliases": "أسماء بديلة مفصولة بفاصلة (الراجحي,alrajhi,alrajhi bank)",\n' +
+      '  "isMine": true,\n' +
+      '  "isInternal": false\n' +
+      '}\n\n' +
+      'إذا كان الحساب محفظة إلكترونية (STC Pay, Urpay, etc) ضع isInternal: true\n' +
+      'رد فقط بـ JSON بدون أي نص إضافي.';
+
+    var payload = {
+      messages: [{ role: "user", content: prompt }],
+      model: "grok-beta",
+      temperature: 0.1
+    };
+    
+    var options = {
+      method: 'POST',
+      contentType: 'application/json',
+      headers: { 'Authorization': 'Bearer ' + ENV.GROK_API_KEY },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    };
+    
+    var response = UrlFetchApp.fetch('https://api.x.ai/v1/chat/completions', options);
+    var result = JSON.parse(response.getContentText());
+    
+    if (result.choices && result.choices[0] && result.choices[0].message) {
+      var aiResponse = result.choices[0].message.content.trim();
+      aiResponse = aiResponse.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      var accountData = JSON.parse(aiResponse);
+      return { success: true, account: accountData, rawSMS: smsText };
+    } else {
+      return { success: false, error: 'فشل الحصول على رد من Grok AI' };
+    }
+  } catch (e) {
+    Logger.log('Error extracting account from SMS: ' + e);
+    return { success: false, error: 'فشل معالجة الرسالة: ' + e.message };
+  }
+}
+
+/** Public wrapper for account extraction */
+function SOV1_UI_extractAccountFromSMS_(smsText) {
+  return extractAccountFromSMS_(smsText);
 }

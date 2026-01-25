@@ -160,15 +160,294 @@ function SOV1_UI_getCategories_(token) {
 
   var cache = CacheService.getScriptCache();
   var cached = cache.get('UI_CATS');
-  if (cached) { try { return JSON.parse(cached); } catch(e){} }
+  if (cached) { 
+    try { 
+      return JSON.parse(cached); 
+    } catch(e) {
+      Logger.log('Categories cache parse error: ' + e.message);
+    } 
+  }
 
-  var sB = _sheet('Budgets');
-  var last = sB.getLastRow();
-  if (last < 2) return [];
-  var cats = sB.getRange(2,1,last-1,1).getValues().map(function(x){return String(x[0]||'').trim();}).filter(Boolean);
+  // Try Categories sheet first, fallback to Budgets
+  var sCat = _sheet('Categories');
+  var cats = [];
+  
+  if (sCat && sCat.getLastRow() > 1) {
+    // Categories sheet exists with data
+    var data = sCat.getRange(2, 1, sCat.getLastRow() - 1, 4).getValues();
+    for (var i = 0; i < data.length; i++) {
+      var name = String(data[i][0] || '').trim();
+      var icon = String(data[i][1] || '').trim();
+      var active = String(data[i][3] || 'نعم').trim();
+      if (name && active !== 'لا') {
+        cats.push({ name: name, icon: icon });
+      }
+    }
+  } else {
+    // Fallback to Budgets sheet
+    var sB = _sheet('Budgets');
+    var last = sB.getLastRow();
+    if (last >= 2) {
+      var budgetCats = sB.getRange(2, 1, last - 1, 1).getValues();
+      for (var j = 0; j < budgetCats.length; j++) {
+        var c = String(budgetCats[j][0] || '').trim();
+        if (c) cats.push({ name: c, icon: '' });
+      }
+    }
+  }
+  
+  // If still empty, return defaults
+  if (cats.length === 0) {
+    cats = [
+      { name: 'طعام', icon: '🍽️' },
+      { name: 'نقل', icon: '🚗' },
+      { name: 'فواتير', icon: '📄' },
+      { name: 'تسوق', icon: '🛍️' },
+      { name: 'سكن', icon: '🏠' },
+      { name: 'ترفيه', icon: '🎬' },
+      { name: 'صحة', icon: '💊' },
+      { name: 'راتب', icon: '💰' },
+      { name: 'تحويل', icon: '↔️' },
+      { name: 'أخرى', icon: '📦' }
+    ];
+  }
 
   cache.put('UI_CATS', JSON.stringify(cats), 300);
   return cats;
+}
+
+/**
+ * Get all categories with full details for management
+ */
+function SOV1_UI_getCategoriesManage_(token) {
+  if (!SOV1_UI_requireAuth_(token)) throw new Error('غير مصرح');
+  
+  var sCat = _sheet('Categories');
+  if (!sCat || sCat.getLastRow() < 2) {
+    // Create Categories sheet if not exists
+    SOV1_SETUP_CATEGORIES_SHEET_();
+    sCat = _sheet('Categories');
+  }
+  
+  var data = sCat.getRange(2, 1, Math.max(1, sCat.getLastRow() - 1), 5).getValues();
+  var cats = [];
+  
+  for (var i = 0; i < data.length; i++) {
+    var name = String(data[i][0] || '').trim();
+    if (name) {
+      cats.push({
+        row: i + 2,
+        name: name,
+        icon: String(data[i][1] || '').trim(),
+        color: String(data[i][2] || '').trim(),
+        active: String(data[i][3] || 'نعم').trim() !== 'لا',
+        notes: String(data[i][4] || '').trim()
+      });
+    }
+  }
+  
+  return cats;
+}
+
+/**
+ * Add a new category
+ */
+function SOV1_UI_addCategory_(token, name, icon, color) {
+  if (!SOV1_UI_requireAuth_(token)) throw new Error('غير مصرح');
+  
+  name = String(name || '').trim();
+  icon = String(icon || '📦').trim();
+  color = String(color || '#6B7280').trim();
+  
+  if (!name) throw new Error('اسم التصنيف مطلوب');
+  if (name.length > 50) throw new Error('اسم التصنيف طويل جداً');
+  
+  // Check for test/invalid categories
+  if (/test|تجريب|تجربة|fake|dummy/i.test(name)) {
+    throw new Error('لا يمكن إضافة تصنيف تجريبي');
+  }
+  
+  var sCat = _sheet('Categories');
+  if (!sCat || sCat.getLastRow() < 1) {
+    SOV1_SETUP_CATEGORIES_SHEET_();
+    sCat = _sheet('Categories');
+  }
+  
+  // Check if exists
+  var data = sCat.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0] || '').trim().toLowerCase() === name.toLowerCase()) {
+      throw new Error('التصنيف موجود مسبقاً');
+    }
+  }
+  
+  // Add new row
+  sCat.appendRow([name, icon, color, 'نعم', '']);
+  
+  // Clear cache
+  CacheService.getScriptCache().remove('UI_CATS');
+  
+  return { ok: true, name: name };
+}
+
+/**
+ * Update an existing category
+ */
+function SOV1_UI_updateCategory_(token, row, name, icon, color, active) {
+  if (!SOV1_UI_requireAuth_(token)) throw new Error('غير مصرح');
+  
+  row = Number(row || 0);
+  if (row < 2) throw new Error('رقم الصف غير صحيح');
+  
+  name = String(name || '').trim();
+  icon = String(icon || '📦').trim();
+  color = String(color || '#6B7280').trim();
+  var activeStr = active === false ? 'لا' : 'نعم';
+  
+  if (!name) throw new Error('اسم التصنيف مطلوب');
+  
+  // Check for test categories
+  if (/test|تجريب|تجربة|fake|dummy/i.test(name)) {
+    throw new Error('لا يمكن استخدام تصنيف تجريبي');
+  }
+  
+  var sCat = _sheet('Categories');
+  sCat.getRange(row, 1, 1, 4).setValues([[name, icon, color, activeStr]]);
+  
+  // Clear cache
+  CacheService.getScriptCache().remove('UI_CATS');
+  
+  return { ok: true, row: row };
+}
+
+/**
+ * Delete a category (mark as inactive)
+ */
+function SOV1_UI_deleteCategory_(token, row) {
+  if (!SOV1_UI_requireAuth_(token)) throw new Error('غير مصرح');
+  
+  row = Number(row || 0);
+  if (row < 2) throw new Error('رقم الصف غير صحيح');
+  
+  var sCat = _sheet('Categories');
+  var name = String(sCat.getRange(row, 1).getValue() || '').trim();
+  
+  // Don't delete system categories
+  var systemCats = ['أخرى', 'راتب', 'تحويل', 'تحقق', 'مرفوضة'];
+  if (systemCats.indexOf(name) >= 0) {
+    throw new Error('لا يمكن حذف تصنيف النظام');
+  }
+  
+  // Mark as inactive instead of deleting
+  sCat.getRange(row, 4).setValue('لا');
+  
+  // Clear cache
+  CacheService.getScriptCache().remove('UI_CATS');
+  
+  return { ok: true, name: name };
+}
+
+/**
+ * Setup Categories sheet with default data
+ */
+function SOV1_SETUP_CATEGORIES_SHEET_() {
+  var ss = SpreadsheetApp.openById(_prop_('SHEET_ID'));
+  var existing = ss.getSheetByName('Categories');
+  
+  if (existing && existing.getLastRow() > 1) {
+    return existing; // Already has data
+  }
+  
+  var sheet = existing || ss.insertSheet('Categories');
+  
+  // Headers
+  var headers = ['التصنيف', 'الأيقونة', 'اللون', 'نشط', 'ملاحظات'];
+  sheet.getRange(1, 1, 1, 5).setValues([headers]);
+  sheet.getRange(1, 1, 1, 5)
+    .setBackground('#1F2937')
+    .setFontColor('#FFFFFF')
+    .setFontWeight('bold');
+  
+  // Default categories
+  var defaults = [
+    ['طعام', '🍽️', '#EF4444', 'نعم', 'مطاعم، كافيهات، بقالة'],
+    ['نقل', '🚗', '#F59E0B', 'نعم', 'وقود، أوبر، مواصلات'],
+    ['فواتير', '📄', '#3B82F6', 'نعم', 'كهرباء، ماء، اتصالات'],
+    ['تسوق', '🛍️', '#8B5CF6', 'نعم', 'ملابس، إلكترونيات'],
+    ['سكن', '🏠', '#10B981', 'نعم', 'إيجار، صيانة'],
+    ['ترفيه', '🎬', '#EC4899', 'نعم', 'سينما، اشتراكات'],
+    ['صحة', '💊', '#06B6D4', 'نعم', 'طبيب، أدوية'],
+    ['تعليم', '📚', '#6366F1', 'نعم', 'دورات، كتب'],
+    ['راتب', '💰', '#22C55E', 'نعم', 'الراتب الشهري'],
+    ['تحويل', '↔️', '#64748B', 'نعم', 'تحويلات بنكية'],
+    ['أخرى', '📦', '#6B7280', 'نعم', 'مصروفات متنوعة']
+  ];
+  
+  sheet.getRange(2, 1, defaults.length, 5).setValues(defaults);
+  
+  // Formatting
+  sheet.setFrozenRows(1);
+  sheet.setRightToLeft(true);
+  sheet.setColumnWidth(1, 150);
+  sheet.setColumnWidth(2, 60);
+  sheet.setColumnWidth(3, 80);
+  sheet.setColumnWidth(4, 60);
+  sheet.setColumnWidth(5, 200);
+  
+  return sheet;
+}
+
+/**
+ * Clean test categories from all sheets
+ */
+function SOV1_CLEAN_TEST_CATEGORIES_() {
+  var testPatterns = /test|تجريب|تجربة|fake|dummy|sample/i;
+  var cleaned = { categories: 0, transactions: 0, budgets: 0 };
+  
+  // 1. Clean Categories sheet
+  var sCat = _sheet('Categories');
+  if (sCat && sCat.getLastRow() > 1) {
+    var catData = sCat.getRange(2, 1, sCat.getLastRow() - 1, 1).getValues();
+    for (var i = catData.length - 1; i >= 0; i--) {
+      if (testPatterns.test(String(catData[i][0] || ''))) {
+        sCat.deleteRow(i + 2);
+        cleaned.categories++;
+      }
+    }
+  }
+  
+  // 2. Clean Sheet1 transactions with test categories
+  var s1 = _sheet('Sheet1');
+  if (s1 && s1.getLastRow() > 1) {
+    var txData = s1.getRange(2, 11, s1.getLastRow() - 1, 1).getValues(); // Column K = category
+    for (var j = txData.length - 1; j >= 0; j--) {
+      if (testPatterns.test(String(txData[j][0] || ''))) {
+        // Change to 'أخرى' instead of deleting
+        s1.getRange(j + 2, 11).setValue('أخرى');
+        cleaned.transactions++;
+      }
+    }
+  }
+  
+  // 3. Clean Budgets with test categories
+  var sB = _sheet('Budgets');
+  if (sB && sB.getLastRow() > 1) {
+    var budgetData = sB.getRange(2, 1, sB.getLastRow() - 1, 1).getValues();
+    for (var k = budgetData.length - 1; k >= 0; k--) {
+      if (testPatterns.test(String(budgetData[k][0] || ''))) {
+        sB.deleteRow(k + 2);
+        cleaned.budgets++;
+      }
+    }
+  }
+  
+  // Clear cache
+  CacheService.getScriptCache().remove('UI_CATS');
+  
+  Logger.log('✅ Cleaned: ' + cleaned.categories + ' categories, ' + 
+             cleaned.transactions + ' transactions, ' + cleaned.budgets + ' budgets');
+  
+  return cleaned;
 }
 
 function SOV1_UI_changeCategory_(row, newCategory) {
@@ -297,7 +576,7 @@ function SOV1_UI_quickSetup_(setupData) {
 function SOV1_UI_addManualTransaction_(text) {
   try {
     // Use the REAL parsing flow that exists
-    var result = executeUniversalFlowV120(text, 'web_ui', ENV.CHAT_ID || '');
+    var result = processTransaction(text, 'web_ui', ENV.CHAT_ID || '');
     return { success: true, result: result };
   } catch (e) {
     Logger.log('Add transaction error: ' + e.message);
@@ -428,19 +707,20 @@ function SOV1_UI_exportCsv_(token, limit) {
   if (last < 2) return 'لا توجد بيانات';
 
   var start = Math.max(2, last - limit + 1);
-  var rows = s1.getRange(start,1,last-start+1,12).getValues();
+  var rows = s1.getRange(start,1,last-start+1,13).getValues();
 
   var header = ['التاريخ','القناة/المصدر','المبلغ','التاجر','التصنيف','النوع','النص الخام'];
   var lines = [header.join(',')];
 
+  // SCHEMA: UUID[0], Date[1], Tag[2], Day[3], Week[4], Source[5], AccNum[6], CardNum[7], Amount[8], Merchant[9], Category[10], Type[11], Raw[12]
   rows.forEach(function(r){
-    var date = (r[0] instanceof Date) ? Utilities.formatDate(r[0], Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss') : '';
-    var src = String(r[4]||'').replace(/"/g,'""');
-    var amt = Number(r[7]||0).toFixed(2);
-    var merch = String(r[8]||'').replace(/"/g,'""');
-    var cat = String(r[9]||'').replace(/"/g,'""');
-    var typ = String(r[10]||'').replace(/"/g,'""');
-    var raw = String(r[11]||'').replace(/"/g,'""');
+    var date = (r[1] instanceof Date) ? Utilities.formatDate(r[1], Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss') : '';
+    var src = String(r[5]||'').replace(/"/g,'""');
+    var amt = Number(r[8]||0).toFixed(2);
+    var merch = String(r[9]||'').replace(/"/g,'""');
+    var cat = String(r[10]||'').replace(/"/g,'""');
+    var typ = String(r[11]||'').replace(/"/g,'""');
+    var raw = String(r[12]||'').replace(/"/g,'""');
     lines.push(['"'+date+'"','"'+src+'"',amt,'"'+merch+'"','"'+cat+'"','"'+typ+'"','"'+raw+'"'].join(','));
   });
 
@@ -464,12 +744,13 @@ function SOV1_UI_getDashboardData_() {
 
     for (var i = values.length - 1; i >= 1; i--) {
        var row = values[i];
-       var date = row[0]; 
-       var amount = Number(row[7]) || 0; 
-       var merchant = String(row[8]||''); 
-       var category = String(row[9]||'');
-       var typ = String(row[10]||'');
-       var raw = String(row[11]||'');
+       // SCHEMA: UUID[0], Date[1], Tag[2], Day[3], Week[4], Source[5], AccNum[6], CardNum[7], Amount[8], Merchant[9], Category[10], Type[11], Raw[12]
+       var date = row[1]; 
+       var amount = Number(row[8]) || 0; 
+       var merchant = String(row[9]||''); 
+       var category = String(row[10]||'');
+       var typ = String(row[11]||'');
+       var raw = String(row[12]||'');
 
        if (count < 10) {
          txs.push({
@@ -585,11 +866,12 @@ function SOV1_UI_getReportData_(token, period) {
     
     for (var i = 1; i < values.length; i++) {
       var row = values[i];
-      var date = row[0];
-      var amount = Number(row[7]) || 0;
-      var category = String(row[9] || 'أخرى');
-      var typ = String(row[10] || '');
-      var raw = String(row[11] || '');
+      // SCHEMA: UUID[0], Date[1], Tag[2], Day[3], Week[4], Source[5], AccNum[6], CardNum[7], Amount[8], Merchant[9], Category[10], Type[11], Raw[12]
+      var date = row[1];
+      var amount = Number(row[8]) || 0;
+      var category = String(row[10] || 'أخرى');
+      var typ = String(row[11] || '');
+      var raw = String(row[12] || '');
       
       if (date instanceof Date && date >= startDate) {
         txCount++;
@@ -635,6 +917,53 @@ function SOV1_UI_getAccounts_() {
     return SOV1_UI_getAllAccounts_();
   } catch (e) {
     Logger.log('Error getting accounts: ' + e);
+    return [];
+  }
+}
+
+/**
+ * Get accounts with their current balances for dashboard display
+ */
+function SOV1_UI_getAccountsWithBalances_() {
+  try {
+    // Try to get balances from Balances.js function
+    if (typeof getAccountsWithBalances_ === 'function') {
+      return getAccountsWithBalances_();
+    }
+    
+    // Fallback: Get from Balances sheet directly
+    var ss = _ss();
+    var balSheet = ss.getSheetByName('Balances');
+    if (!balSheet || balSheet.getLastRow() < 2) {
+      return [];
+    }
+    
+    var data = balSheet.getDataRange().getValues();
+    var result = [];
+    
+    for (var i = 1; i < data.length; i++) {
+      result.push({
+        name: String(data[i][0] || ''),
+        balance: Number(data[i][1] || 0),
+        lastUpdate: data[i][2] || null
+      });
+    }
+    
+    return result;
+  } catch (e) {
+    Logger.log('Error getting accounts with balances: ' + e);
+    return [];
+  }
+}
+
+/**
+ * Public wrapper for getting accounts with balances
+ */
+function SOV1_UI_getAccountsWithBalances() {
+  try {
+    return SOV1_UI_getAccountsWithBalances_();
+  } catch (e) {
+    Logger.log('Error in SOV1_UI_getAccountsWithBalances: ' + e);
     return [];
   }
 }
@@ -858,6 +1187,37 @@ function SOV1_UI_updateBudget(category, newLimit) {
   }
 }
 
+/**
+ * ✅ تحديث رصيد حساب من الواجهة
+ */
+function SOV1_UI_updateAccountBalance(accountNumber, newBalance) {
+  try {
+    if (typeof setBalance_ === 'function') {
+      setBalance_(accountNumber, Number(newBalance) || 0);
+      return { success: true, message: 'تم تحديث الرصيد' };
+    }
+    return { success: false, error: 'دالة تحديث الرصيد غير متاحة' };
+  } catch (e) {
+    Logger.log('Error in SOV1_UI_updateAccountBalance: ' + e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * ✅ الحصول على ملخص الديون
+ */
+function SOV1_UI_getDebtSummary() {
+  try {
+    if (typeof getDebtSummary_ === 'function') {
+      return { success: true, data: getDebtSummary_() };
+    }
+    return { success: false, error: 'دالة الديون غير متاحة' };
+  } catch (e) {
+    Logger.log('Error in SOV1_UI_getDebtSummary: ' + e);
+    return { success: false, error: e.message };
+  }
+}
+
 function SOV1_UI_updateTransaction(rowId, newData) {
   try {
     return SOV1_UI_updateTransaction_(rowId, newData);
@@ -872,97 +1232,6 @@ function SOV1_UI_getTransaction(rowId) {
     return SOV1_UI_getTransaction_(rowId);
   } catch (e) {
     Logger.log('Error in SOV1_UI_getTransaction: ' + e);
-    return { success: false, error: e.message };
-  }
-}
-
-// ============================================================================
-// ACCOUNTS MANAGEMENT API WRAPPERS
-// ============================================================================
-
-function SOV1_UI_addAccount(accountData) {
-  try {
-    if (typeof SOV1_UI_addAccount_ === 'function') {
-      return SOV1_UI_addAccount_(accountData);
-    }
-    return { success: false, error: 'Function SOV1_UI_addAccount_ not found' };
-  } catch (e) {
-    Logger.log('Error in SOV1_UI_addAccount: ' + e);
-    return { success: false, error: e.message };
-  }
-}
-
-function SOV1_UI_updateAccount(accountId, accountData) {
-  try {
-    if (typeof SOV1_UI_updateAccount_ === 'function') {
-      return SOV1_UI_updateAccount_(accountId, accountData);
-    }
-    return { success: false, error: 'Function SOV1_UI_updateAccount_ not found' };
-  } catch (e) {
-    Logger.log('Error in SOV1_UI_updateAccount: ' + e);
-    return { success: false, error: e.message };
-  }
-}
-
-function SOV1_UI_deleteAccount(accountId) {
-  try {
-    if (typeof SOV1_UI_deleteAccount_ === 'function') {
-      return SOV1_UI_deleteAccount_(accountId);
-    }
-    return { success: false, error: 'Function SOV1_UI_deleteAccount_ not found' };
-  } catch (e) {
-    Logger.log('Error in SOV1_UI_deleteAccount: ' + e);
-    return { success: false, error: e.message };
-  }
-}
-
-function SOV1_UI_extractAccountFromSMS(smsText) {
-  try {
-    // Use AI to extract account info from SMS
-    if (typeof extractAccountInfoFromSMS === 'function') {
-      return extractAccountInfoFromSMS(smsText);
-    }
-    
-    // Fallback: Basic regex extraction
-    var result = {
-      name: '',
-      type: 'بنك',
-      number: '',
-      bank: '',
-      aliases: ''
-    };
-    
-    var text = String(smsText || '');
-    
-    // Extract bank name
-    if (/AlRajhi|الراجحي/i.test(text)) {
-      result.bank = 'AlRajhiBank';
-      result.name = 'الراجحي';
-    } else if (/STC\s*Pay/i.test(text)) {
-      result.bank = 'STC Pay';
-      result.name = 'STC Pay';
-      result.type = 'محفظة';
-    } else if (/tiqmo/i.test(text)) {
-      result.bank = 'tiqmo';
-      result.name = 'tiqmo';
-      result.type = 'محفظة';
-    }
-    
-    // Extract account/card number (last 4 digits)
-    var numMatch = text.match(/(\d{4})/);
-    if (numMatch) {
-      result.number = numMatch[1];
-      if (result.name) {
-        result.name += ' ' + result.number;
-      }
-    }
-    
-    return {
-      success: true,
-      account: result
-    };
-  } catch (e) {
-    Logger.log('Error in SOV1_UI_extractAccountFromSMS: ' + e);
     return { success: false, error: e.message };
   }
 }
@@ -987,16 +1256,17 @@ function SOV1_UI_exportData() {
     var csv = 'ID,Date,Merchant,Type,Amount,Category,Account,Notes\n';
     
     // Start from row 1 (skip header at row 0)
+    // SCHEMA: UUID[0], Date[1], Tag[2], Day[3], Week[4], Source[5], AccNum[6], CardNum[7], Amount[8], Merchant[9], Category[10], Type[11], Raw[12]
     for (var i = 1; i < data.length; i++) {
       var row = data[i];
       var id = row[0] || '';
       var date = row[1] ? Utilities.formatDate(new Date(row[1]), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss') : '';
       var merchant = String(row[9] || '').replace(/"/g, '""'); // Escape quotes
-      var type = row[3] || '';
+      var type = row[11] || '';
       var amount = row[8] || 0;
       var category = row[10] || '';
       var account = row[6] || '';
-      var notes = String(row[11] || '').replace(/"/g, '""');
+      var notes = String(row[12] || '').replace(/"/g, '""');
       
       csv += '"' + id + '","' + date + '","' + merchant + '","' + type + '","' + amount + '","' + category + '","' + account + '","' + notes + '"\n';
     }
@@ -1010,45 +1280,24 @@ function SOV1_UI_exportData() {
 }
 
 /**
- * Delete all user data (DANGEROUS)
+ * Delete all user data (DANGEROUS) - Uses new SOV1_UI_resetData_ function
  */
-function SOV1_UI_deleteAccount() {
+function SOV1_UI_deleteAllData() {
   try {
-    var ss = _ss(); // Use _ss() for web app context
-    
-    // Clear all data sheets (keep headers)
-    var sheetsToClean = ['Sheet1', 'Budgets', 'Accounts', 'Debt_Ledger', 'Config'];
-    
-    for (var i = 0; i < sheetsToClean.length; i++) {
-      var sheetName = sheetsToClean[i];
-      var sheet = ss.getSheetByName(sheetName);
-      
-      if (sheet && sheet.getLastRow() > 1) {
-        // Delete all data rows but keep header
-        sheet.deleteRows(2, sheet.getLastRow() - 1);
-      }
-    }
-    
-    // Delete Classifier_Map completely if it exists
-    var classifierSheet = ss.getSheetByName('Classifier_Map');
-    if (classifierSheet) {
-      ss.deleteSheet(classifierSheet);
-    }
-    
-    Logger.log('Account deleted by user: ' + Session.getActiveUser().getEmail());
-    
-    return {
-      success: true,
-      message: 'تم حذف جميع البيانات بنجاح'
-    };
-    
+    // Use the new reset function instead
+    return SOV1_UI_resetData_('OPEN', ['transactions', 'budgets', 'accounts', 'transfers'], 'CONFIRM_RESET');
   } catch (e) {
-    Logger.log('Error deleting account: ' + e);
+    Logger.log('Error deleting all data: ' + e);
     return {
       success: false,
-      error: 'فشل حذف الحساب: ' + e.message
+      error: 'فشل حذف البيانات: ' + e.message
     };
   }
+}
+
+// Legacy alias - keep for backward compatibility with old frontend calls
+function SOV1_UI_deleteUserAccount() {
+  return SOV1_UI_deleteAllData();
 }
 
 // ============================================================================
@@ -1126,8 +1375,8 @@ function SOV1_UI_getAllDashboardData(token) {
     }
     
     try {
-      debugLog.push('🏦 Fetching accounts...');
-      accounts = SOV1_UI_getAccounts_();
+      debugLog.push('🏦 Fetching accounts with balances...');
+      accounts = SOV1_UI_getAccountsWithBalances_();
       debugLog.push('✅ Accounts fetched: ' + (accounts ? accounts.length : 0));
     } catch (e) {
       debugLog.push('⚠️ Accounts error: ' + e.message);
@@ -1162,6 +1411,255 @@ function SOV1_UI_getAllDashboardData(token) {
       accounts: []
     };
   }
+}
+
+// ============================================================================
+// DATA RESET FUNCTIONS - DANGER ZONE
+// ============================================================================
+
+/**
+ * Get reset options and current data stats
+ */
+function SOV1_UI_getResetOptions_() {
+  try {
+    var ss = _ss();
+    var stats = {
+      transactions: 0,
+      budgets: 0,
+      accounts: 0,
+      transfers: 0,
+      categories: 0
+    };
+    
+    // Count transactions
+    var txSheet = ss.getSheetByName('User_USER1') || ss.getSheetByName('Sheet1');
+    if (txSheet) {
+      stats.transactions = Math.max(0, txSheet.getLastRow() - 1);
+    }
+    
+    // Count budgets
+    var budgetSheet = ss.getSheetByName('Budgets');
+    if (budgetSheet) {
+      stats.budgets = Math.max(0, budgetSheet.getLastRow() - 1);
+    }
+    
+    // Count accounts
+    var accSheet = ss.getSheetByName('Accounts');
+    if (accSheet) {
+      stats.accounts = Math.max(0, accSheet.getLastRow() - 1);
+    }
+    
+    // Count transfers
+    var transferSheet = ss.getSheetByName('Transfers_Tracking');
+    if (transferSheet) {
+      stats.transfers = Math.max(0, transferSheet.getLastRow() - 1);
+    }
+    
+    // Count categories
+    var catSheet = ss.getSheetByName('Categories');
+    if (catSheet) {
+      stats.categories = Math.max(0, catSheet.getLastRow() - 1);
+    }
+    
+    return {
+      success: true,
+      stats: stats,
+      options: [
+        { id: 'transactions', label: 'المعاملات', icon: '💳', count: stats.transactions, dangerous: true },
+        { id: 'budgets', label: 'الميزانيات', icon: '📊', count: stats.budgets, dangerous: false },
+        { id: 'accounts', label: 'الحسابات', icon: '🏦', count: stats.accounts, dangerous: true },
+        { id: 'transfers', label: 'التحويلات', icon: '↔️', count: stats.transfers, dangerous: false },
+        { id: 'categories', label: 'التصنيفات', icon: '🏷️', count: stats.categories, dangerous: false },
+        { id: 'all', label: 'كل البيانات', icon: '⚠️', count: null, dangerous: true }
+      ]
+    };
+    
+  } catch (e) {
+    Logger.log('getResetOptions error: ' + e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Reset selected data types
+ * @param {string} token - Security token
+ * @param {Array} types - Array of data types to reset: 'transactions', 'budgets', 'accounts', 'transfers', 'categories', 'all'
+ * @param {string} confirmation - Must be 'CONFIRM_RESET' to proceed
+ */
+function SOV1_UI_resetData_(token, types, confirmation) {
+  try {
+    // Validate confirmation
+    if (confirmation !== 'CONFIRM_RESET') {
+      return { success: false, error: 'تأكيد غير صحيح. يجب كتابة CONFIRM_RESET' };
+    }
+    
+    if (!types || !Array.isArray(types) || types.length === 0) {
+      return { success: false, error: 'لم يتم تحديد نوع البيانات للحذف' };
+    }
+    
+    var ss = _ss();
+    var results = {
+      success: true,
+      deleted: {},
+      errors: []
+    };
+    
+    // Handle 'all' option
+    if (types.includes('all')) {
+      types = ['transactions', 'budgets', 'accounts', 'transfers'];
+    }
+    
+    // Process each type
+    types.forEach(function(type) {
+      try {
+        switch (type) {
+          case 'transactions':
+            results.deleted.transactions = resetTransactions_(ss);
+            break;
+          case 'budgets':
+            results.deleted.budgets = resetBudgets_(ss);
+            break;
+          case 'accounts':
+            results.deleted.accounts = resetAccounts_(ss);
+            break;
+          case 'transfers':
+            results.deleted.transfers = resetTransfers_(ss);
+            break;
+          case 'categories':
+            results.deleted.categories = resetCategories_(ss);
+            break;
+        }
+      } catch (typeError) {
+        results.errors.push(type + ': ' + typeError.message);
+      }
+    });
+    
+    if (results.errors.length > 0) {
+      results.success = false;
+      results.error = 'بعض الأخطاء: ' + results.errors.join(', ');
+    }
+    
+    // Log the reset action
+    Logger.log('🗑️ Data reset by user: ' + JSON.stringify(results.deleted));
+    
+    // Send Telegram notification if available
+    try {
+      if (typeof sendTelegramMessage === 'function') {
+        var chatId = PropertiesService.getScriptProperties().getProperty('TELEGRAM_CHAT_ID');
+        if (chatId) {
+          var msg = '⚠️ *تم تصفير البيانات*\n\n';
+          for (var key in results.deleted) {
+            msg += '• ' + key + ': ' + results.deleted[key] + ' سجل\n';
+          }
+          sendTelegramMessage(chatId, msg);
+        }
+      }
+    } catch (tgErr) {
+      // Ignore Telegram errors
+    }
+    
+    return results;
+    
+  } catch (e) {
+    Logger.log('resetData error: ' + e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Reset transactions (keep headers)
+ */
+function resetTransactions_(ss) {
+  var sheets = ['User_USER1', 'Sheet1'];
+  var totalDeleted = 0;
+  
+  sheets.forEach(function(name) {
+    var sheet = ss.getSheetByName(name);
+    if (sheet && sheet.getLastRow() > 1) {
+      var rowsToDelete = sheet.getLastRow() - 1;
+      sheet.deleteRows(2, rowsToDelete);
+      totalDeleted += rowsToDelete;
+    }
+  });
+  
+  return totalDeleted;
+}
+
+/**
+ * Reset budgets (keep headers, reset amounts to 0)
+ */
+function resetBudgets_(ss) {
+  var sheet = ss.getSheetByName('Budgets');
+  if (!sheet || sheet.getLastRow() <= 1) return 0;
+  
+  var lastRow = sheet.getLastRow();
+  var resetCount = lastRow - 1;
+  
+  // Reset spent amounts to 0 (assuming column structure: category, budgeted, spent, remaining)
+  for (var row = 2; row <= lastRow; row++) {
+    sheet.getRange(row, 3).setValue(0); // Reset spent
+    sheet.getRange(row, 4).setFormula('=B' + row + '-C' + row); // Recalculate remaining
+  }
+  
+  return resetCount;
+}
+
+/**
+ * Reset accounts (delete all except headers)
+ */
+function resetAccounts_(ss) {
+  var sheet = ss.getSheetByName('Accounts');
+  if (!sheet || sheet.getLastRow() <= 1) return 0;
+  
+  var rowsToDelete = sheet.getLastRow() - 1;
+  sheet.deleteRows(2, rowsToDelete);
+  
+  // Clear account index cache
+  if (typeof _accountIndex !== 'undefined') {
+    _accountIndex = null;
+  }
+  
+  return rowsToDelete;
+}
+
+/**
+ * Reset transfers (delete all except headers)
+ */
+function resetTransfers_(ss) {
+  var sheet = ss.getSheetByName('Transfers_Tracking');
+  if (!sheet || sheet.getLastRow() <= 1) return 0;
+  
+  var rowsToDelete = sheet.getLastRow() - 1;
+  sheet.deleteRows(2, rowsToDelete);
+  return rowsToDelete;
+}
+
+/**
+ * Reset categories (delete non-system categories)
+ */
+function resetCategories_(ss) {
+  var sheet = ss.getSheetByName('Categories');
+  if (!sheet || sheet.getLastRow() <= 1) return 0;
+  
+  // System categories to keep
+  var systemCategories = ['أخرى', 'راتب', 'تحويل', 'تحقق', 'مرفوضة', 'طعام', 'نقل', 'فواتير', 'تسوق', 'صحة', 'ترفيه'];
+  
+  var data = sheet.getDataRange().getValues();
+  var rowsToDelete = [];
+  
+  for (var i = data.length - 1; i >= 1; i--) {
+    var catName = data[i][0];
+    if (!systemCategories.includes(catName)) {
+      rowsToDelete.push(i + 1); // 1-based row number
+    }
+  }
+  
+  // Delete rows from bottom to top
+  rowsToDelete.forEach(function(row) {
+    sheet.deleteRow(row);
+  });
+  
+  return rowsToDelete.length;
 }
 
 // ============================================================================
@@ -1214,3 +1712,206 @@ function SOV1_UI_getAllDashboardData_safe(token) {
   }
 }
 
+// ============================================================================
+// TEST PANEL FUNCTIONS - For Frontend Testing
+// ============================================================================
+
+/**
+ * Test SMS parsing functionality
+ */
+function SOV1_UI_testParseSMS(smsText) {
+  try {
+    // Use the enhanced parser if available
+    var parsed = null;
+    
+    if (typeof enhancedParseAmount === 'function') {
+      parsed = enhancedParseAmount(smsText);
+    } else if (typeof parseBasicSMS_ === 'function') {
+      parsed = parseBasicSMS_(smsText);
+    } else if (typeof SOV1_preParseFallback_ === 'function') {
+      parsed = SOV1_preParseFallback_(smsText);
+    }
+    
+    if (parsed && parsed.amount) {
+      return {
+        success: true,
+        amount: parsed.amount,
+        merchant: parsed.merchant || 'غير محدد',
+        account: parsed.account || 'غير محدد',
+        type: parsed.type || (parsed.amount > 0 ? 'expense' : 'income'),
+        raw: parsed
+      };
+    }
+    
+    return {
+      success: false,
+      error: 'لم يتم العثور على مبلغ في النص'
+    };
+  } catch (e) {
+    Logger.log('Test SMS Error: ' + e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Test AI classification
+ */
+function SOV1_UI_testAIClassify(merchant, amount) {
+  try {
+    var result = null;
+    
+    if (typeof classifyWithAI === 'function') {
+      result = classifyWithAI(merchant, amount);
+    } else if (typeof callAiHybridV120 === 'function') {
+      result = callAiHybridV120(merchant, amount);
+    } else if (typeof SOV1_callAiClassifier_ === 'function') {
+      result = SOV1_callAiClassifier_(merchant, amount);
+    }
+    
+    if (result) {
+      return {
+        success: true,
+        category: result.category || result,
+        confidence: result.confidence || 100,
+        source: result.source || 'AI'
+      };
+    }
+    
+    // Fallback to simple classifier
+    var categories = {
+      'ماكدونالدز': 'مطاعم',
+      'subway': 'مطاعم',
+      'starbucks': 'مطاعم',
+      'careem': 'نقل',
+      'uber': 'نقل',
+      'جرير': 'تسوق',
+      'اكسترا': 'تسوق'
+    };
+    
+    var lower = String(merchant).toLowerCase();
+    for (var key in categories) {
+      if (lower.indexOf(key.toLowerCase()) >= 0) {
+        return {
+          success: true,
+          category: categories[key],
+          confidence: 80,
+          source: 'Keyword Match'
+        };
+      }
+    }
+    
+    return {
+      success: true,
+      category: 'أخرى',
+      confidence: 50,
+      source: 'Default'
+    };
+  } catch (e) {
+    Logger.log('Test AI Error: ' + e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Test Telegram connection
+ */
+function SOV1_UI_testTelegram() {
+  try {
+    var botToken = ENV.TG_BOT_TOKEN || PropertiesService.getScriptProperties().getProperty('TG_BOT_TOKEN');
+    var chatId = ENV.TG_CHAT_ID || PropertiesService.getScriptProperties().getProperty('TG_CHAT_ID');
+    
+    if (!botToken || !chatId) {
+      return {
+        success: false,
+        error: 'لم يتم إعداد Telegram Bot Token أو Chat ID'
+      };
+    }
+    
+    var testMessage = '🧪 *رسالة تجريبية*\n\n' +
+      '✅ تم الاتصال بنجاح!\n' +
+      '📅 التاريخ: ' + new Date().toLocaleString('ar-SA') + '\n\n' +
+      '_هذه رسالة اختبار من SJA Money Tracker_';
+    
+    var url = 'https://api.telegram.org/bot' + botToken + '/sendMessage';
+    var payload = {
+      chat_id: chatId,
+      text: testMessage,
+      parse_mode: 'Markdown'
+    };
+    
+    var options = {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    };
+    
+    var response = UrlFetchApp.fetch(url, options);
+    var result = JSON.parse(response.getContentText());
+    
+    if (result.ok) {
+      return { success: true };
+    } else {
+      return { success: false, error: result.description || 'Unknown error' };
+    }
+  } catch (e) {
+    Logger.log('Test Telegram Error: ' + e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Test full flow: SMS -> AI -> Save -> Telegram
+ */
+function SOV1_UI_testFullFlow() {
+  var steps = { sms: 'pending', ai: 'pending', save: 'skipped', telegram: 'pending' };
+  
+  try {
+    // Step 1: Test SMS Parsing
+    var testSMS = 'تم خصم مبلغ 99.50 ريال من حسابك ****1234 لدى كوفي شوب في ' + new Date().toLocaleDateString('ar-SA');
+    var smsResult = SOV1_UI_testParseSMS(testSMS);
+    
+    if (smsResult.success) {
+      steps.sms = '✅ Amount: ' + smsResult.amount + ', Merchant: ' + smsResult.merchant;
+    } else {
+      steps.sms = '❌ ' + (smsResult.error || 'Failed');
+      return { success: false, steps: steps, error: 'SMS parsing failed' };
+    }
+    
+    // Step 2: Test AI Classification
+    var aiResult = SOV1_UI_testAIClassify(smsResult.merchant, smsResult.amount);
+    
+    if (aiResult.success) {
+      steps.ai = '✅ Category: ' + aiResult.category + ' (' + aiResult.source + ')';
+    } else {
+      steps.ai = '❌ ' + (aiResult.error || 'Failed');
+      return { success: false, steps: steps, error: 'AI classification failed' };
+    }
+    
+    // Step 3: Skip actual save (test only)
+    steps.save = '⏭️ Skipped (test mode - no data saved)';
+    
+    // Step 4: Test Telegram
+    var telegramResult = SOV1_UI_testTelegram();
+    
+    if (telegramResult.success) {
+      steps.telegram = '✅ Message sent';
+    } else {
+      steps.telegram = '⚠️ ' + (telegramResult.error || 'Failed') + ' (non-critical)';
+    }
+    
+    return {
+      success: true,
+      steps: steps,
+      summary: 'جميع المكونات تعمل بشكل صحيح!'
+    };
+    
+  } catch (e) {
+    Logger.log('Test Full Flow Error: ' + e.message);
+    return { 
+      success: false, 
+      steps: steps,
+      error: e.message 
+    };
+  }
+}

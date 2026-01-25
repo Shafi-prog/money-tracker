@@ -71,6 +71,9 @@ function onOpen(e) {
       ui.createMenu('🟦 اختبارات وتحسينات النظام')
         .addItem('✅ تشغيل جميع الاختبارات (RUN_ALL_TESTS)', 'RUN_ALL_TESTS')
         .addSeparator()
+        .addItem('🏷️ إعداد ورقة التصنيفات', 'SOV1_SETUP_CATEGORIES_SHEET_')
+        .addItem('🧹 تنظيف التصنيفات التجريبية', 'SOV1_CLEAN_TEST_CATEGORIES_')
+        .addSeparator()
         .addItem(' تدقيق وربط البيانات (RUN_FULL_AUDIT_)', 'RUN_FULL_AUDIT_')
         .addItem('🔄 ترحيل Sheet1 للمخطط الجديد', 'MIGRATE_SHEET1_SCHEMA_')
         .addItem('🧩 إعادة بناء الروابط (Sheet1 → Budgets/Dashboard)', 'REBUILD_LINKS_FROM_SHEET1_')
@@ -444,10 +447,10 @@ function RUN_ALL_PHASES_() {
 function processMessage(text, source, chatId) {
   source = source || 'unknown';
   
-  // استخدام executeUniversalFlowV120 من Flow.gs
-  if (typeof executeUniversalFlowV120 === 'function') {
-    return executeUniversalFlowV120(text, source, chatId);
+  // استخدام processTransaction من Flow.gs
+  if (typeof processTransaction === 'function') {
+    return processTransaction(text, source, chatId);
   }
   
-  throw new Error('executeUniversalFlowV120 غير موجودة في Flow.gs');
+  throw new Error('processTransaction غير موجودة في Flow.gs');
 }

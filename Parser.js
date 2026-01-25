@@ -187,7 +187,7 @@ function callAiHybridEnhanced(text, context) {
   var accounts = identifyAccounts_(text, knownAccounts);
   
   // Get base AI result
-  var ai = callAiHybridV120(text);
+  var ai = classifyWithAI(text);
   
   // Enhance with parsed data
   ai.transactionDate = smsDate;

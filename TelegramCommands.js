@@ -18,16 +18,19 @@ function SOV1_setMyCommands_() {
   if (!ENV.TELEGRAM_TOKEN) throw new Error('TELEGRAM_BOT_TOKEN غير موجود في Script Properties');
 
   var cmds = [
+    { command: 'start', description: '🚀 بدء البوت وإظهار القائمة' },
     { command: 'menu', description: '📊 إظهار لوحة التحكم' },
     { command: 'menu_off', description: '❌ إخفاء لوحة التحكم' },
-    { command: 'search', description: '🔎 بحث: /search كلمة' },
-    { command: 'add', description: '➕ إدخال يدوي: /add مبلغ ثم جهة ثم تصنيف' },
-    { command: 'balances', description: '💳 أرصدة جميع الحسابات' },
     { command: 'today', description: '📅 تقرير اليوم' },
     { command: 'week', description: '🗓️ تقرير الأسبوع' },
     { command: 'month', description: '🗓️ تقرير الشهر' },
+    { command: 'budgets', description: '📋 ملخص الميزانيات' },
+    { command: 'balances', description: '💳 أرصدة الحسابات' },
+    { command: 'last', description: '🧾 آخر 5 عمليات' },
+    { command: 'search', description: '🔎 بحث: /search كلمة' },
+    { command: 'add', description: '➕ إدخال يدوي: /add مبلغ|جهة|تصنيف' },
     { command: 'status', description: '⚙️ حالة النظام' },
-    { command: 'help', description: '❓ مساعدة سريعة' }
+    { command: 'help', description: '❓ مساعدة وتعليمات' }
   ];
 
   var url = 'https://api.telegram.org/bot' + ENV.TELEGRAM_TOKEN + '/setMyCommands';

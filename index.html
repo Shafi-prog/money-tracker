@@ -36,7 +36,8 @@
         showEditTransactionModal: false,
         editingTransaction: null,
         newTransaction: { amount: '', merchant: '', category: 'أخرى', type: 'expense' },
-        categories: ['طعام', 'نقل', 'فواتير', 'تسوق', 'سكن', 'ترفيه', 'صحة', 'أخرى'],
+        categories: [], // Loaded dynamically from backend
+        categoriesLoaded: false,
         userSettings: { user_name: '', user_email: '', enable_notifications: true, telegram_notifications: true, budget_alerts: true, default_currency: 'SAR', language: 'ar', salary_day: 1, auto_apply_rules: true },
         reportPeriod: 'monthly',
         reportData: null,
@@ -50,6 +51,9 @@
         newBudget: { category: '', limit: '' },
         showPrivacyModal: false,
         toasts: [],
+        // Test panel states
+        testingStates: { sms: false, ai: false, telegram: false, fullFlow: false },
+        testResults: { sms: '', ai: '', telegram: '', fullFlow: '' },
         
         navigateToPage(pageName) {
           this.page = pageName;
@@ -60,14 +64,111 @@
         },
         
         init() {
-          console.log('🚀 SJA Money Tracker v2.0 - Initialized');
-          console.log('✅ Using optimized single API call');
-          // Load settings first, then load data after settings complete
+          console.log('🚀 SJA Money Tracker v2.1 - Fast Loading');
+          console.log('✅ Using optimized fast API with caching');
           this.loading = true;
-          this.loadSettings();
+          this.loadTime = Date.now();
+          
+          // ✅ Safety timeout - stop loading after 10 seconds no matter what
+          var self = this;
+          setTimeout(function() {
+            if (self.loading) {
+              console.warn('⚠️ Loading timeout - forcing complete');
+              self.loading = false;
+              if (!self.transactions || self.transactions.length === 0) {
+                self.errorMessage = 'تعذر تحميل البيانات. تحقق من الاتصال.';
+              }
+            }
+          }, 10000);
+          
+          // Try fast API first, fallback to regular
+          this.tryFastLoad();
+        },
+        
+        // NEW: Fast loading with fallback
+        tryFastLoad() {
+          if (typeof google === 'undefined' || !google.script) {
+            console.error('Google Apps Script API not available');
+            this.loading = false;
+            this.errorMessage = 'لا يمكن الاتصال بالخادم';
+            return;
+          }
+          
+          console.log('⚡ Trying fast API...');
+          google.script.run
+            .withSuccessHandler(result => {
+              if (result && result.success && result.data) {
+                console.log('⚡ Fast load succeeded in ' + (Date.now() - this.loadTime) + 'ms');
+                this.processFastData(result.data);
+              } else {
+                console.log('⚠️ Fast API returned no data, falling back...');
+                this.loadSettings();
+              }
+            })
+            .withFailureHandler(err => {
+              console.log('⚠️ Fast API failed, falling back to regular: ' + err);
+              this.loadSettings();
+            })
+            .SOV1_FAST_getDashboard();
+        },
+        
+        // Load categories from backend
+        loadCategories() {
+          if (this.categoriesLoaded) return;
+          
+          if (typeof google === 'undefined' || !google.script) {
+            // Fallback to defaults
+            this.categories = ['طعام', 'نقل', 'فواتير', 'تسوق', 'سكن', 'ترفيه', 'صحة', 'راتب', 'تحويل', 'أخرى'];
+            return;
+          }
+          
+          google.script.run
+            .withSuccessHandler(cats => {
+              if (cats && Array.isArray(cats) && cats.length > 0) {
+                // Categories can be objects with name/icon or plain strings
+                this.categories = cats.map(c => typeof c === 'object' ? c.name : c);
+                this.categoriesLoaded = true;
+                console.log('✅ Categories loaded:', this.categories.length);
+              } else {
+                // Fallback defaults
+                this.categories = ['طعام', 'نقل', 'فواتير', 'تسوق', 'سكن', 'ترفيه', 'صحة', 'راتب', 'تحويل', 'أخرى'];
+              }
+            })
+            .withFailureHandler(err => {
+              console.warn('⚠️ Failed to load categories:', err);
+              this.categories = ['طعام', 'نقل', 'فواتير', 'تسوق', 'سكن', 'ترفيه', 'صحة', 'راتب', 'تحويل', 'أخرى'];
+            })
+            .SOV1_UI_getCategories_('OPEN');
+        },
+        
+        // NEW: Process fast API data
+        processFastData(data) {
+          try {
+            if (data.kpi) {
+              this.incomeMonth = data.kpi.incomeM || 0;
+              this.spendMonth = data.kpi.spendM || 0;
+              this.netMonth = data.kpi.netM || 0;
+            }
+            if (data.recentTransactions) {
+              this.transactions = data.recentTransactions;
+            }
+            if (data.budgets) {
+              this.budgets = data.budgets;
+            }
+            // Also load categories
+            this.loadCategories();
+            this.loading = false;
+            console.log('✅ Data loaded in ' + (Date.now() - this.loadTime) + 'ms');
+          } catch (e) {
+            console.error('Error processing fast data:', e);
+            this.loadSettings();
+          }
         },
         
         loadSettings() {
+          // Load categories in parallel
+          this.loadCategories();
+          
           google.script.run
             .withSuccessHandler(result => {
               if (result && result.settings) {
@@ -700,7 +801,300 @@
           const num = parseFloat(value);
           return !isNaN(num) && num > 0;
         },
+
+        // ============ TEST PANEL FUNCTIONS ============
         
+        testSMSParsing() {
+          this.testingStates.sms = true;
+          this.testResults.sms = 'جاري اختبار تحليل SMS...';
+          
+          // Sample SMS message for testing
+          const testSMS = 'تم خصم مبلغ 150.00 ريال من حسابك الجاري ****1234 لدى ماكدونالدز في 2025/01/24';
+          
+          google.script.run
+            .withSuccessHandler(result => {
+              this.testingStates.sms = false;
+              if (result && result.success) {
+                this.testResults.sms = '✅ نجح تحليل SMS!\n\n' +
+                  'المبلغ: ' + (result.amount || 'غير محدد') + '\n' +
+                  'التاجر: ' + (result.merchant || 'غير محدد') + '\n' +
+                  'الحساب: ' + (result.account || 'غير محدد') + '\n' +
+                  'النوع: ' + (result.type || 'غير محدد');
+              } else {
+                this.testResults.sms = '⚠️ فشل التحليل: ' + (result?.error || 'خطأ غير معروف');
+              }
+            })
+            .withFailureHandler(err => {
+              this.testingStates.sms = false;
+              this.testResults.sms = '❌ خطأ: ' + (err.message || err);
+            })
+            .SOV1_UI_testParseSMS(testSMS);
+        },
+        
+        testAIClassification() {
+          this.testingStates.ai = true;
+          this.testResults.ai = 'جاري اختبار تصنيف AI...';
+          
+          google.script.run
+            .withSuccessHandler(result => {
+              this.testingStates.ai = false;
+              if (result && result.success) {
+                this.testResults.ai = '✅ نجح تصنيف AI!\n\n' +
+                  'التصنيف: ' + (result.category || 'غير محدد') + '\n' +
+                  'الثقة: ' + (result.confidence || 'غير محدد') + '%\n' +
+                  'المصدر: ' + (result.source || 'غير محدد');
+              } else {
+                this.testResults.ai = '⚠️ فشل التصنيف: ' + (result?.error || 'خطأ غير معروف');
+              }
+            })
+            .withFailureHandler(err => {
+              this.testingStates.ai = false;
+              this.testResults.ai = '❌ خطأ: ' + (err.message || err);
+            })
+            .SOV1_UI_testAIClassify('ماكدونالدز', 150);
+        },
+        
+        testTelegram() {
+          this.testingStates.telegram = true;
+          this.testResults.telegram = 'جاري إرسال رسالة تجريبية...';
+          
+          google.script.run
+            .withSuccessHandler(result => {
+              this.testingStates.telegram = false;
+              if (result && result.success) {
+                this.testResults.telegram = '✅ تم إرسال الرسالة بنجاح!\n\n' +
+                  'تحقق من تيليجرام لرؤية الرسالة التجريبية.';
+              } else {
+                this.testResults.telegram = '⚠️ فشل الإرسال: ' + (result?.error || 'خطأ غير معروف');
+              }
+            })
+            .withFailureHandler(err => {
+              this.testingStates.telegram = false;
+              this.testResults.telegram = '❌ خطأ: ' + (err.message || err);
+            })
+            .SOV1_UI_testTelegram();
+        },
+        
+        testFullFlow() {
+          this.testingStates.fullFlow = true;
+          this.testResults.fullFlow = 'جاري اختبار التدفق الكامل...\n' +
+            '1️⃣ تحليل SMS...\n' +
+            '2️⃣ تصنيف AI...\n' +
+            '3️⃣ حفظ البيانات...\n' +
+            '4️⃣ إرسال إشعار...';
+          
+          google.script.run
+            .withSuccessHandler(result => {
+              this.testingStates.fullFlow = false;
+              if (result && result.success) {
+                this.testResults.fullFlow = '✅ نجح التدفق الكامل!\n\n' +
+                  '📝 SMS: ' + (result.steps?.sms || '✓') + '\n' +
+                  '🤖 AI: ' + (result.steps?.ai || '✓') + '\n' +
+                  '💾 Save: ' + (result.steps?.save || '✓') + '\n' +
+                  '📱 Telegram: ' + (result.steps?.telegram || '✓') + '\n\n' +
+                  'النتيجة: ' + (result.summary || 'اكتمل بنجاح');
+              } else {
+                this.testResults.fullFlow = '⚠️ فشل التدفق: ' + (result?.error || 'خطأ غير معروف') +
+                  '\n\nالخطوات المكتملة:\n' +
+                  (result?.steps ? JSON.stringify(result.steps, null, 2) : 'غير متاح');
+              }
+            })
+            .withFailureHandler(err => {
+              this.testingStates.fullFlow = false;
+              this.testResults.fullFlow = '❌ خطأ: ' + (err.message || err);
+            })
+            .SOV1_UI_testFullFlow();
+        },
+        // ============ END TEST PANEL ============
+
+        // ============ REPORT EXPORT FUNCTIONS ============
+        exportReportPDF() {
+          this.showToast('جاري إنشاء PDF...', 'info');
+          
+          // Create a printable version of the report
+          const reportContent = document.getElementById('reportContent');
+          if (!reportContent) {
+            this.showToast('لا يوجد تقرير للتصدير', 'error');
+            return;
+          }
+          
+          // Create PDF-friendly HTML
+          const periodNames = { daily: 'اليوم', weekly: 'الأسبوع', monthly: 'الشهر' };
+          const periodName = periodNames[this.reportPeriod] || 'التقرير';
+          
+          const printContent = `
+            <!DOCTYPE html>
+            <html lang="ar" dir="rtl">
+            <head>
+              <meta charset="utf-8">
+              <title>تقرير ${periodName} - SJA Money Tracker</title>
+              <style>
+                body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; padding: 40px; direction: rtl; }
+                h1 { color: #16a34a; margin-bottom: 10px; }
+                .date { color: #666; margin-bottom: 30px; }
+                .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 30px; }
+                .stat-box { border: 1px solid #e5e7eb; border-radius: 12px; padding: 20px; text-align: center; }
+                .stat-label { font-size: 14px; color: #666; margin-bottom: 5px; }
+                .stat-value { font-size: 24px; font-weight: bold; }
+                .green { color: #16a34a; }
+                .red { color: #dc2626; }
+                .blue { color: #2563eb; }
+                .categories { margin-top: 30px; }
+                .categories h2 { margin-bottom: 20px; }
+                .cat-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f3f4f6; }
+                .footer { margin-top: 50px; text-align: center; color: #999; font-size: 12px; }
+                @media print { body { padding: 20px; } }
+              </style>
+            </head>
+            <body>
+              <h1>📊 تقرير ${periodName}</h1>
+              <div class="date">التاريخ: ${new Date().toLocaleDateString('ar-SA')}</div>
+              
+              <div class="stats">
+                <div class="stat-box"><div class="stat-label">الدخل</div><div class="stat-value green">${this.formatMoney(this.reportData?.income || 0)}</div></div>
+                <div class="stat-box"><div class="stat-label">المصروفات</div><div class="stat-value red">${this.formatMoney(this.reportData?.expenses || 0)}</div></div>
+                <div class="stat-box"><div class="stat-label">الادخار</div><div class="stat-value ${(this.reportData?.savings || 0) >= 0 ? 'green' : 'red'}">${this.formatMoney(this.reportData?.savings || 0)}</div></div>
+                <div class="stat-box"><div class="stat-label">عدد العمليات</div><div class="stat-value blue">${this.reportData?.transactionCount || 0}</div></div>
+              </div>
+              
+              <div class="categories">
+                <h2>المصروفات حسب التصنيف</h2>
+                ${(this.reportData?.chartData || []).map(item => 
+                  `<div class="cat-item"><span>${item.category}</span><span>${this.formatMoney(item.amount)}</span></div>`
+                ).join('')}
+              </div>
+              
+              <div class="footer">SJA Money Tracker - ${new Date().toLocaleDateString('ar-SA')}</div>
+            </body>
+            </html>
+          `;
+          
+          // Open print dialog (user can save as PDF)
+          const printWindow = window.open('', '_blank');
+          printWindow.document.write(printContent);
+          printWindow.document.close();
+          printWindow.focus();
+          
+          setTimeout(() => {
+            printWindow.print();
+            this.showToast('اختر "حفظ كـ PDF" من نافذة الطباعة', 'success');
+          }, 500);
+        },
+        
+        exportReportCSV() {
+          if (!this.reportData) {
+            this.showToast('لا يوجد تقرير للتصدير', 'error');
+            return;
+          }
+          
+          const periodNames = { daily: 'daily', weekly: 'weekly', monthly: 'monthly' };
+          const period = periodNames[this.reportPeriod] || 'report';
+          
+          // Create CSV content
+          let csv = 'التصنيف,المبلغ\n';
+          (this.reportData?.chartData || []).forEach(item => {
+            csv += `"${item.category}",${item.amount}\n`;
+          });
+          csv += `\n"إجمالي الدخل",${this.reportData?.income || 0}\n`;
+          csv += `"إجمالي المصروفات",${this.reportData?.expenses || 0}\n`;
+          csv += `"الادخار",${this.reportData?.savings || 0}\n`;
+          csv += `"عدد العمليات",${this.reportData?.transactionCount || 0}\n`;
+          
+          const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(blob);
+          link.download = `report_${period}_${new Date().toISOString().split('T')[0]}.csv`;
+          link.click();
+          
+          this.showToast('تم تصدير التقرير بنجاح', 'success');
+        },
+        
+        printReport() {
+          if (!this.reportData) {
+            this.showToast('لا يوجد تقرير للطباعة', 'error');
+            return;
+          }
+          this.exportReportPDF(); // Same as PDF - opens print dialog
+        },
+        
+        exportAllDataPDF() {
+          this.showToast('جاري إنشاء PDF...', 'info');
+          
+          // Create comprehensive PDF with all transactions
+          const printContent = `
+            <!DOCTYPE html>
+            <html lang="ar" dir="rtl">
+            <head>
+              <meta charset="utf-8">
+              <title>تقرير المعاملات - SJA Money Tracker</title>
+              <style>
+                body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; padding: 40px; direction: rtl; }
+                h1 { color: #16a34a; margin-bottom: 10px; }
+                .date { color: #666; margin-bottom: 30px; }
+                .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 30px; }
+                .summary-box { border: 1px solid #e5e7eb; border-radius: 12px; padding: 20px; text-align: center; }
+                .summary-label { font-size: 14px; color: #666; margin-bottom: 5px; }
+                .summary-value { font-size: 24px; font-weight: bold; }
+                .green { color: #16a34a; }
+                .red { color: #dc2626; }
+                table { width: 100%; border-collapse: collapse; margin-top: 30px; }
+                th, td { border: 1px solid #e5e7eb; padding: 12px; text-align: right; }
+                th { background: #f9fafb; font-weight: bold; }
+                tr:nth-child(even) { background: #f9fafb; }
+                .footer { margin-top: 50px; text-align: center; color: #999; font-size: 12px; }
+                @media print { body { padding: 20px; } }
+              </style>
+            </head>
+            <body>
+              <h1>📊 تقرير المعاملات المالية</h1>
+              <div class="date">التاريخ: ${new Date().toLocaleDateString('ar-SA')}</div>
+              
+              <div class="summary">
+                <div class="summary-box"><div class="summary-label">الرصيد</div><div class="summary-value green">${this.formatMoney(this.stats.balance)}</div></div>
+                <div class="summary-box"><div class="summary-label">الدخل</div><div class="summary-value green">${this.formatMoney(this.stats.income)}</div></div>
+                <div class="summary-box"><div class="summary-label">المصروفات</div><div class="summary-value red">${this.formatMoney(this.stats.expense)}</div></div>
+                <div class="summary-box"><div class="summary-label">التوفير</div><div class="summary-value">${this.formatMoney(this.stats.savings)}</div></div>
+              </div>
+              
+              <h2>آخر ${Math.min(this.allTransactions.length, 50)} معاملة</h2>
+              <table>
+                <thead>
+                  <tr>
+                    <th>التاريخ</th>
+                    <th>التاجر</th>
+                    <th>التصنيف</th>
+                    <th>المبلغ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${this.allTransactions.slice(0, 50).map(tx => `
+                    <tr>
+                      <td>${this.formatDate(tx.date)}</td>
+                      <td>${tx.merchant || 'غير محدد'}</td>
+                      <td>${tx.category || 'أخرى'}</td>
+                      <td class="${tx.amount > 0 ? 'red' : 'green'}">${this.formatMoney(Math.abs(tx.amount))}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+              
+              <div class="footer">SJA Money Tracker - تم الإنشاء في ${new Date().toLocaleString('ar-SA')}</div>
+            </body>
+            </html>
+          `;
+          
+          const printWindow = window.open('', '_blank');
+          printWindow.document.write(printContent);
+          printWindow.document.close();
+          printWindow.focus();
+          
+          setTimeout(() => {
+            printWindow.print();
+            this.showToast('اختر "حفظ كـ PDF" من نافذة الطباعة', 'success');
+          }, 500);
+        },
+        // ============ END REPORT EXPORT ============
+
         exportData() {
           this.showToast('جاري تصدير البيانات...', 'info');
           google.script.run
@@ -1065,6 +1459,36 @@
         </div>
       </div>
 
+      <!-- Accounts Summary Section -->
+      <div class="mt-8" x-show="accounts.length > 0">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-lg font-bold text-gray-800">💳 حساباتي</h3>
+          <a href="#" @click.prevent="page = 'accounts'" class="text-sm text-green-600 hover:underline font-medium">إدارة الحسابات</a>
+        </div>
+        <div class="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          <template x-for="account in accounts.slice(0, 4)" :key="account.name">
+            <div class="bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl p-4 text-white shadow-lg hover:shadow-xl transition-shadow">
+              <div class="flex items-center justify-between mb-3">
+                <span class="text-xl">
+                  <span x-show="account.type === 'بنك' || !account.type">🏦</span>
+                  <span x-show="account.type === 'بطاقة'">💳</span>
+                  <span x-show="account.type === 'محفظة'">👛</span>
+                </span>
+                <span class="text-xs bg-white/20 px-2 py-1 rounded-full" x-text="account.bank || account.type || 'حساب'"></span>
+              </div>
+              <div class="font-bold text-sm truncate mb-2" x-text="account.name">اسم الحساب</div>
+              <div class="text-lg font-bold" x-text="formatMoney(account.balance || 0)">0.00</div>
+              <div x-show="account.lastUpdate" class="text-xs opacity-75 mt-2" x-text="'آخر تحديث: ' + formatDate(account.lastUpdate)"></div>
+            </div>
+          </template>
+        </div>
+        <div x-show="accounts.length > 4" class="mt-3 text-center">
+          <button @click="page = 'accounts'" class="text-sm text-green-600 hover:underline font-medium">
+            عرض جميع الحسابات (<span x-text="accounts.length"></span>)
+          </button>
+        </div>
+      </div>
+
       <!-- Recent Transactions & Charts -->
       <div class="grid lg:grid-cols-3 gap-8">
         <!-- Recent Transactions List -->
@@ -1358,10 +1782,17 @@
             <span>⚙️</span> النظام
           </h2>
           <div class="space-y-3">
-            <button @click="exportData()" class="w-full px-4 py-3 text-right border border-gray-200 rounded-lg hover:bg-gray-50 transition flex items-center justify-between">
-              <span class="font-medium text-gray-900">تصدير البيانات</span>
-              <span class="text-gray-400">→</span>
-            </button>
+            <div class="p-4 border border-gray-200 rounded-lg">
+              <p class="font-medium text-gray-900 mb-3">📤 تصدير البيانات</p>
+              <div class="flex gap-2">
+                <button @click="exportData()" class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">
+                  📊 CSV
+                </button>
+                <button @click="exportAllDataPDF()" class="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition">
+                  📄 PDF
+                </button>
+              </div>
+            </div>
             <button @click="showPrivacyModal = true" class="w-full px-4 py-3 text-right border border-gray-200 rounded-lg hover:bg-gray-50 transition flex items-center justify-between">
               <span class="font-medium text-gray-900">سياسة الخصوصية</span>
               <span class="text-gray-400">→</span>
@@ -1373,8 +1804,86 @@
           </div>
         </div>
 
+        <!-- Test Panel Section -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <h2 class="font-bold text-gray-900 mb-4 flex items-center gap-2">
+            <span>🧪</span> لوحة الاختبارات
+          </h2>
+          <p class="text-sm text-gray-600 mb-4">اختبر مكونات النظام للتأكد من عملها بشكل صحيح</p>
+          
+          <div class="space-y-3">
+            <!-- Test SMS Parsing -->
+            <div class="p-4 border border-gray-200 rounded-lg">
+              <div class="flex items-center justify-between mb-3">
+                <div>
+                  <p class="font-medium text-gray-900">📝 اختبار تحليل SMS</p>
+                  <p class="text-xs text-gray-500">تجربة قراءة رسالة بنكية</p>
+                </div>
+                <button @click="testSMSParsing()" 
+                        :disabled="testingStates.sms"
+                        class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:bg-gray-400 transition">
+                  <span x-show="!testingStates.sms">تشغيل</span>
+                  <span x-show="testingStates.sms">جاري...</span>
+                </button>
+              </div>
+              <div x-show="testResults.sms" class="mt-2 p-3 bg-gray-50 rounded text-xs font-mono overflow-auto max-h-40 whitespace-pre-wrap" x-text="testResults.sms"></div>
+            </div>
+
+            <!-- Test AI Classification -->
+            <div class="p-4 border border-gray-200 rounded-lg">
+              <div class="flex items-center justify-between mb-3">
+                <div>
+                  <p class="font-medium text-gray-900">🤖 اختبار تصنيف AI</p>
+                  <p class="text-xs text-gray-500">تجربة التصنيف الذكي</p>
+                </div>
+                <button @click="testAIClassification()" 
+                        :disabled="testingStates.ai"
+                        class="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:bg-gray-400 transition">
+                  <span x-show="!testingStates.ai">تشغيل</span>
+                  <span x-show="testingStates.ai">جاري...</span>
+                </button>
+              </div>
+              <div x-show="testResults.ai" class="mt-2 p-3 bg-gray-50 rounded text-xs font-mono overflow-auto max-h-40 whitespace-pre-wrap" x-text="testResults.ai"></div>
+            </div>
+
+            <!-- Test Telegram -->
+            <div class="p-4 border border-gray-200 rounded-lg">
+              <div class="flex items-center justify-between mb-3">
+                <div>
+                  <p class="font-medium text-gray-900">📱 اختبار تيليجرام</p>
+                  <p class="text-xs text-gray-500">إرسال رسالة تجريبية</p>
+                </div>
+                <button @click="testTelegram()" 
+                        :disabled="testingStates.telegram"
+                        class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:bg-gray-400 transition">
+                  <span x-show="!testingStates.telegram">تشغيل</span>
+                  <span x-show="testingStates.telegram">جاري...</span>
+                </button>
+              </div>
+              <div x-show="testResults.telegram" class="mt-2 p-3 bg-gray-50 rounded text-xs font-mono overflow-auto max-h-40 whitespace-pre-wrap" x-text="testResults.telegram"></div>
+            </div>
+
+            <!-- Test Full Flow -->
+            <div class="p-4 border border-orange-200 bg-orange-50 rounded-lg">
+              <div class="flex items-center justify-between mb-3">
+                <div>
+                  <p class="font-medium text-gray-900">⚡ اختبار التدفق الكامل</p>
+                  <p class="text-xs text-gray-500">SMS → AI → حفظ → إشعار (شامل)</p>
+                </div>
+                <button @click="testFullFlow()" 
+                        :disabled="testingStates.fullFlow"
+                        class="px-4 py-2 bg-orange-600 text-white rounded-lg text-sm font-medium hover:bg-orange-700 disabled:bg-gray-400 transition">
+                  <span x-show="!testingStates.fullFlow">تشغيل</span>
+                  <span x-show="testingStates.fullFlow">جاري...</span>
+                </button>
+              </div>
+              <div x-show="testResults.fullFlow" class="mt-2 p-3 bg-white rounded text-xs font-mono overflow-auto max-h-40 whitespace-pre-wrap" x-text="testResults.fullFlow"></div>
+            </div>
+          </div>
+        </div>
+
         <div class="text-center text-sm text-gray-500 py-4">
-          <p>SJA Money Tracker v2.0</p>
+          <p>SJA Money Tracker v2.1</p>
           <p class="mt-1">صُنع بـ ❤️ في السعودية</p>
         </div>
       </div>
@@ -1402,13 +1911,26 @@
         </button>
       </div>
       
+      <!-- Export Buttons -->
+      <div x-show="reportData" class="flex gap-3 mb-6">
+        <button @click="exportReportPDF()" class="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition flex items-center gap-2">
+          📄 تصدير PDF
+        </button>
+        <button @click="exportReportCSV()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition flex items-center gap-2">
+          📊 تصدير CSV
+        </button>
+        <button @click="printReport()" class="px-4 py-2 bg-gray-600 text-white rounded-lg text-sm font-medium hover:bg-gray-700 transition flex items-center gap-2">
+          🖨️ طباعة
+        </button>
+      </div>
+
       <div x-show="!reportData" class="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 text-center">
         <div class="text-6xl mb-4">📊</div>
         <h3 class="text-xl font-bold text-gray-900 mb-2">اختر فترة التقرير</h3>
         <p class="text-gray-600">انقر على أحد الأزرار أعلاه لعرض التقرير</p>
       </div>
       
-      <div x-show="reportData" class="space-y-6">
+      <div x-show="reportData" class="space-y-6" id="reportContent">
         <!-- Stats -->
         <div class="grid md:grid-cols-4 gap-4">
           <div class="bg-white rounded-xl border border-gray-200 p-6">
@@ -1469,13 +1991,9 @@
           ➕ إضافة أول حساب
         </button>
       </div>
-        <button @click="openAccountModal()" class="px-6 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 transition">
-          ➕ إضافة أول حساب
-        </button>
-      </div>
       
       <div x-show="accounts.length > 0" class="grid md:grid-cols-2 gap-6">
-        <template x-for="account in accounts" :key="account.id">
+        <template x-for="account in accounts" :key="account.id || account.name">
           <div class="bg-gradient-to-br from-green-600 to-green-700 rounded-2xl shadow-lg p-6 text-white relative">
             <div class="absolute top-4 left-4 flex gap-2">
               <button @click="editAccount(account)" class="w-8 h-8 bg-white/20 hover:bg-white/30 rounded-lg flex items-center justify-center">
@@ -1485,20 +2003,28 @@
                 🗑️
               </button>
             </div>
-            <div class="flex justify-between items-start mb-8 pr-20">
+            <div class="flex justify-between items-start mb-4 pr-20">
               <div>
-                <p class="text-sm font-medium mb-1" x-text="account.name">اسم الحساب</p>
-                <p class="text-xs opacity-75" x-text="account.type + ' • ' + account.bank">التفاصيل</p>
+                <p class="text-lg font-bold mb-1" x-text="account.name">اسم الحساب</p>
+                <p class="text-xs opacity-75" x-text="(account.type || 'حساب') + ' • ' + (account.bank || '')"></p>
               </div>
               <div class="text-2xl">
-                <span x-show="account.type === 'بنك'">🏦</span>
+                <span x-show="account.type === 'بنك' || !account.type">🏦</span>
                 <span x-show="account.type === 'بطاقة'">💳</span>
                 <span x-show="account.type === 'محفظة'">👛</span>
               </div>
             </div>
-            <div class="mb-2">
+            
+            <!-- Balance Display -->
+            <div class="bg-white/10 rounded-xl p-4 mb-4">
+              <p class="text-xs opacity-75 mb-1">الرصيد الحالي</p>
+              <p class="text-2xl font-bold" x-text="formatMoney(account.balance || 0)">0.00 ر.س</p>
+              <p x-show="account.lastUpdate" class="text-xs opacity-60 mt-1" x-text="'آخر تحديث: ' + formatDate(account.lastUpdate)"></p>
+            </div>
+            
+            <div class="mb-2" x-show="account.number">
               <p class="text-xs opacity-75 mb-1">رقم الحساب</p>
-              <p class="text-lg font-mono tracking-wider" x-text="account.number || 'غير محدد'">****</p>
+              <p class="text-sm font-mono tracking-wider" x-text="account.number || ''">****</p>
             </div>
             <div class="flex gap-2 mt-4">
               <span x-show="account.isMine" class="px-2 py-1 bg-white/20 rounded text-xs">حسابي</span>

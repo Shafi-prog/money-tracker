@@ -197,6 +197,169 @@
       </div>
     </form>
 
+    <!-- Categories Management Section -->
+    <div class="mt-8 bg-white rounded-xl shadow-lg p-6">
+      <div class="flex items-center justify-between mb-6">
+        <h2 class="text-2xl font-bold flex items-center gap-2">
+          <span>🏷️</span>
+          <span>إدارة التصنيفات</span>
+        </h2>
+        <button 
+          @click="showAddCategoryModal = true"
+          class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2"
+        >
+          <span>➕</span>
+          <span>إضافة تصنيف</span>
+        </button>
+      </div>
+
+      <!-- Categories Loading -->
+      <div x-show="categoriesLoading" class="text-center py-8">
+        <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto"></div>
+        <p class="text-gray-500 mt-2">جاري تحميل التصنيفات...</p>
+      </div>
+
+      <!-- Categories Grid -->
+      <div x-show="!categoriesLoading" class="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <template x-for="cat in categories" :key="cat.row">
+          <div 
+            class="p-4 border-2 rounded-lg transition"
+            :class="cat.active ? 'border-gray-200 bg-white' : 'border-red-200 bg-red-50 opacity-60'"
+          >
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <span class="text-2xl" x-text="cat.icon || '📦'"></span>
+                <div>
+                  <h3 class="font-bold" x-text="cat.name"></h3>
+                  <p class="text-sm text-gray-500" x-text="cat.notes || ''"></p>
+                </div>
+              </div>
+              <div class="flex gap-2">
+                <button 
+                  @click="editCategory(cat)"
+                  class="p-2 text-blue-600 hover:bg-blue-100 rounded-lg"
+                  title="تعديل"
+                >
+                  ✏️
+                </button>
+                <button 
+                  @click="deleteCategory(cat)"
+                  class="p-2 text-red-600 hover:bg-red-100 rounded-lg"
+                  title="حذف"
+                  x-show="!['أخرى', 'راتب', 'تحويل', 'تحقق', 'مرفوضة'].includes(cat.name)"
+                >
+                  🗑️
+                </button>
+              </div>
+            </div>
+            <div class="mt-2 flex items-center gap-2">
+              <div 
+                class="w-4 h-4 rounded-full"
+                :style="'background-color: ' + (cat.color || '#6B7280')"
+              ></div>
+              <span class="text-xs" :class="cat.active ? 'text-green-600' : 'text-red-600'" x-text="cat.active ? 'نشط' : 'معطل'"></span>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- Empty State -->
+      <div x-show="!categoriesLoading && categories.length === 0" class="text-center py-8 text-gray-500">
+        <span class="text-4xl block mb-2">📭</span>
+        <p>لا توجد تصنيفات. أضف تصنيفاً جديداً.</p>
+      </div>
+
+      <!-- Clean Test Categories Button -->
+      <div class="mt-6 pt-4 border-t border-gray-200">
+        <button 
+          @click="cleanTestCategories()"
+          :disabled="formStates.isCleaning"
+          class="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition disabled:opacity-50"
+        >
+          <span x-show="!formStates.isCleaning">🧹 تنظيف التصنيفات التجريبية</span>
+          <span x-show="formStates.isCleaning">⏳ جاري التنظيف...</span>
+        </button>
+        <p class="text-sm text-gray-500 mt-2">إزالة التصنيفات التي تحتوي على كلمات مثل: test, تجريب, fake</p>
+      </div>
+    </div>
+
+    <!-- Add/Edit Category Modal -->
+    <div 
+      x-show="showAddCategoryModal || showEditCategoryModal" 
+      x-transition
+      class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      @click.self="closeModals()"
+    >
+      <div class="bg-white rounded-xl p-6 w-full max-w-md shadow-2xl">
+        <h3 class="text-xl font-bold mb-4" x-text="showEditCategoryModal ? 'تعديل التصنيف' : 'إضافة تصنيف جديد'"></h3>
+        
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">اسم التصنيف *</label>
+            <input 
+              type="text" 
+              x-model="categoryForm.name"
+              class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              placeholder="مثال: طعام، نقل، تسوق"
+              maxlength="50"
+            >
+          </div>
+          
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">الأيقونة</label>
+            <div class="flex gap-2 flex-wrap">
+              <template x-for="icon in availableIcons" :key="icon">
+                <button 
+                  type="button"
+                  @click="categoryForm.icon = icon"
+                  class="w-10 h-10 text-xl rounded-lg border-2 transition"
+                  :class="categoryForm.icon === icon ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-400'"
+                  x-text="icon"
+                ></button>
+              </template>
+            </div>
+          </div>
+          
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">اللون</label>
+            <div class="flex gap-2 flex-wrap">
+              <template x-for="color in availableColors" :key="color">
+                <button 
+                  type="button"
+                  @click="categoryForm.color = color"
+                  class="w-8 h-8 rounded-full border-2 transition"
+                  :class="categoryForm.color === color ? 'border-gray-800 ring-2 ring-offset-2 ring-gray-400' : 'border-transparent'"
+                  :style="'background-color: ' + color"
+                ></button>
+              </template>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-3" x-show="showEditCategoryModal">
+            <input type="checkbox" x-model="categoryForm.active" id="catActive" class="w-4 h-4">
+            <label for="catActive" class="text-sm text-gray-700">تصنيف نشط</label>
+          </div>
+        </div>
+        
+        <div class="flex gap-3 mt-6">
+          <button 
+            @click="saveCategory()"
+            :disabled="!categoryForm.name || formStates.isSavingCategory"
+            class="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <span x-show="!formStates.isSavingCategory" x-text="showEditCategoryModal ? 'حفظ التعديلات' : 'إضافة التصنيف'"></span>
+            <span x-show="formStates.isSavingCategory">⏳ جاري الحفظ...</span>
+          </button>
+          <button 
+            @click="closeModals()"
+            class="px-4 py-3 bg-gray-300 text-gray-700 rounded-lg font-bold hover:bg-gray-400"
+          >
+            إلغاء
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Quick Links -->
     <div class="mt-8 bg-white rounded-xl shadow-lg p-6">
       <h2 class="text-xl font-bold mb-4">🔗 روابط سريعة</h2>
@@ -216,6 +379,83 @@
       </div>
     </div>
 
+    <!-- Danger Zone - Data Reset -->
+    <div class="mt-8 bg-red-50 border-2 border-red-200 rounded-xl shadow-lg p-6">
+      <div class="flex items-center gap-3 mb-6">
+        <span class="text-3xl">⚠️</span>
+        <div>
+          <h2 class="text-2xl font-bold text-red-800">منطقة الخطر</h2>
+          <p class="text-red-600">هذه العمليات لا يمكن التراجع عنها!</p>
+        </div>
+      </div>
+
+      <!-- Data Stats -->
+      <div x-show="resetStats" class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+        <template x-for="opt in resetOptions" :key="opt.id">
+          <div 
+            class="p-3 rounded-lg text-center cursor-pointer border-2 transition"
+            :class="selectedResets.includes(opt.id) ? 'border-red-500 bg-red-100' : 'border-gray-200 bg-white hover:border-red-300'"
+            @click="toggleResetOption(opt.id)"
+            x-show="opt.id !== 'all'"
+          >
+            <span class="text-2xl block" x-text="opt.icon"></span>
+            <span class="font-medium block" x-text="opt.label"></span>
+            <span class="text-sm text-gray-500" x-text="opt.count + ' سجل'"></span>
+          </div>
+        </template>
+      </div>
+
+      <!-- Reset Confirmation -->
+      <div x-show="selectedResets.length > 0" class="bg-white rounded-lg p-4 border-2 border-red-300">
+        <p class="text-red-700 font-bold mb-3">
+          ⚠️ أنت على وشك حذف: 
+          <span x-text="selectedResets.map(id => resetOptions.find(o => o.id === id)?.label).join('، ')"></span>
+        </p>
+        
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-gray-700 mb-2">
+            للتأكيد، اكتب <code class="bg-gray-100 px-2 py-1 rounded">CONFIRM_RESET</code>
+          </label>
+          <input 
+            type="text" 
+            x-model="resetConfirmation"
+            class="w-full px-4 py-3 border-2 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+            :class="resetConfirmation === 'CONFIRM_RESET' ? 'border-green-500' : 'border-gray-300'"
+            placeholder="اكتب CONFIRM_RESET للتأكيد"
+            dir="ltr"
+          >
+        </div>
+
+        <div class="flex gap-3">
+          <button 
+            @click="executeReset()"
+            :disabled="resetConfirmation !== 'CONFIRM_RESET' || formStates.isResetting"
+            class="px-6 py-3 bg-red-600 text-white rounded-lg font-bold hover:bg-red-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            <span x-show="!formStates.isResetting">🗑️ تنفيذ الحذف</span>
+            <span x-show="formStates.isResetting" class="animate-pulse">⏳ جاري الحذف...</span>
+          </button>
+          <button 
+            @click="cancelReset()"
+            class="px-6 py-3 bg-gray-500 text-white rounded-lg font-bold hover:bg-gray-600 transition"
+          >
+            إلغاء
+          </button>
+        </div>
+      </div>
+
+      <!-- Reset All Button -->
+      <div class="mt-4 pt-4 border-t border-red-200">
+        <button 
+          @click="selectAllForReset()"
+          class="px-4 py-2 bg-red-800 text-white rounded-lg hover:bg-red-900 transition"
+        >
+          ⚠️ تحديد الكل للحذف
+        </button>
+        <p class="text-sm text-red-600 mt-2">سيحذف جميع المعاملات والحسابات والتحويلات وإعادة ضبط الميزانيات</p>
+      </div>
+    </div>
+
   </div>
 
   <script>
@@ -230,26 +470,49 @@
           auto_apply_rules: true
         },
 
+        // Categories management
+        categories: [],
+        categoriesLoading: false,
+        showAddCategoryModal: false,
+        showEditCategoryModal: false,
+        categoryForm: {
+          row: null,
+          name: '',
+          icon: '📦',
+          color: '#6B7280',
+          active: true
+        },
+        availableIcons: ['🍽️', '🚗', '📄', '🛍️', '🏠', '🎬', '💊', '📚', '💰', '↔️', '📦', '💳', '🎮', '✈️', '💪', '🎁', '☕', '🛒', '🏥', '📱'],
+        availableColors: ['#EF4444', '#F59E0B', '#10B981', '#3B82F6', '#8B5CF6', '#EC4899', '#06B6D4', '#6366F1', '#22C55E', '#64748B', '#6B7280', '#1F2937'],
+
+        // Data reset management
+        resetStats: null,
+        resetOptions: [],
+        selectedResets: [],
+        resetConfirmation: '',
+
         notifications: {
           success: { show: false, text: '' },
           error: { show: false, text: '' }
         },
 
-        // Professional pattern: separate loading state
         formStates: {
           isSubmitting: false,
-          isLoading: false
+          isLoading: false,
+          isSavingCategory: false,
+          isCleaning: false,
+          isResetting: false
         },
 
         init() {
-          // CRITICAL FIX: Load async, don't block initialization
           setTimeout(() => {
             this.loadSettings();
+            this.loadCategories();
+            this.loadResetOptions();
           }, 100);
         },
 
         loadSettings() {
-          // Don't call if google.script.run doesn't exist (testing)
           if (typeof google === 'undefined' || !google.script || !google.script.run) {
             console.log('Running in standalone mode - using defaults');
             return;
@@ -267,51 +530,260 @@
             .withFailureHandler((error) => {
               this.formStates.isLoading = false;
               console.error('Load error:', error);
-              // Don't show error to user - just use defaults
             })
             .getSettings();
         },
 
+        loadResetOptions() {
+          if (typeof google === 'undefined' || !google.script || !google.script.run) {
+            // Demo data for standalone mode
+            this.resetStats = { transactions: 150, budgets: 12, accounts: 5, transfers: 8, categories: 20 };
+            this.resetOptions = [
+              { id: 'transactions', label: 'المعاملات', icon: '💳', count: 150 },
+              { id: 'budgets', label: 'الميزانيات', icon: '📊', count: 12 },
+              { id: 'accounts', label: 'الحسابات', icon: '🏦', count: 5 },
+              { id: 'transfers', label: 'التحويلات', icon: '↔️', count: 8 },
+              { id: 'categories', label: 'التصنيفات', icon: '🏷️', count: 20 }
+            ];
+            return;
+          }
+          
+          google.script.run
+            .withSuccessHandler((result) => {
+              if (result && result.success) {
+                this.resetStats = result.stats;
+                this.resetOptions = result.options;
+              }
+            })
+            .withFailureHandler((error) => {
+              console.error('Load reset options error:', error);
+            })
+            .SOV1_UI_getResetOptions_();
+        },
+
+        toggleResetOption(id) {
+          if (this.selectedResets.includes(id)) {
+            this.selectedResets = this.selectedResets.filter(r => r !== id);
+          } else {
+            this.selectedResets.push(id);
+          }
+        },
+
+        selectAllForReset() {
+          this.selectedResets = ['transactions', 'budgets', 'accounts', 'transfers'];
+        },
+
+        cancelReset() {
+          this.selectedResets = [];
+          this.resetConfirmation = '';
+        },
+
+        executeReset() {
+          if (this.resetConfirmation !== 'CONFIRM_RESET') {
+            alert('يجب كتابة CONFIRM_RESET للتأكيد');
+            return;
+          }
+          
+          if (this.selectedResets.length === 0) {
+            alert('لم يتم تحديد أي بيانات للحذف');
+            return;
+          }
+          
+          if (!confirm('⚠️ تأكيد نهائي: هل أنت متأكد من حذف البيانات المحددة؟\\n\\nهذا الإجراء لا يمكن التراجع عنه!')) {
+            return;
+          }
+          
+          this.formStates.isResetting = true;
+          
+          google.script.run
+            .withSuccessHandler((result) => {
+              this.formStates.isResetting = false;
+              
+              if (result && result.success) {
+                let msg = 'تم الحذف بنجاح:\\n';
+                for (let key in result.deleted) {
+                  msg += '• ' + key + ': ' + result.deleted[key] + ' سجل\\n';
+                }
+                this.notifications.success.show = true;
+                this.notifications.success.text = msg;
+                setTimeout(() => { this.notifications.success.show = false; }, 5000);
+                
+                // Reset form and reload stats
+                this.cancelReset();
+                this.loadResetOptions();
+              } else {
+                this.notifications.error.show = true;
+                this.notifications.error.text = result.error || 'فشل الحذف';
+              }
+            })
+            .withFailureHandler((error) => {
+              this.formStates.isResetting = false;
+              this.notifications.error.show = true;
+              this.notifications.error.text = 'خطأ: ' + error.message;
+            })
+            .SOV1_UI_resetData_('OPEN', this.selectedResets, this.resetConfirmation);
+        },
+
+        loadCategories() {
+          if (typeof google === 'undefined' || !google.script || !google.script.run) {
+            return;
+          }
+          
+          this.categoriesLoading = true;
+          
+          google.script.run
+            .withSuccessHandler((cats) => {
+              this.categoriesLoading = false;
+              if (cats && Array.isArray(cats)) {
+                this.categories = cats;
+              }
+            })
+            .withFailureHandler((error) => {
+              this.categoriesLoading = false;
+              console.error('Categories load error:', error);
+            })
+            .SOV1_UI_getCategoriesManage_('OPEN');
+        },
+
         saveSettings() {
-          // CRITICAL FIX: Check if google.script.run exists
           if (typeof google === 'undefined' || !google.script || !google.script.run) {
             this.notifications.error.show = true;
             this.notifications.error.text = 'الرجاء فتح الصفحة من خلال رابط النشر';
             return;
           }
           
-          // CRITICAL FIX: Proper loading state management (Firefly III pattern)
           this.formStates.isSubmitting = true;
           this.notifications.success.show = false;
           this.notifications.error.show = false;
 
           google.script.run
             .withSuccessHandler((result) => {
-              // ALWAYS clear loading state first
               this.formStates.isSubmitting = false;
               
               if (result && result.success) {
-                // Show success message
                 this.notifications.success.show = true;
                 this.notifications.success.text = result.message || 'تم حفظ الإعدادات بنجاح!';
-                
-                // Auto-hide after 3 seconds
-                setTimeout(() => {
-                  this.notifications.success.show = false;
-                }, 3000);
+                setTimeout(() => { this.notifications.success.show = false; }, 3000);
               } else {
-                // Show error
                 this.notifications.error.show = true;
                 this.notifications.error.text = result.error || 'فشل حفظ الإعدادات';
               }
             })
             .withFailureHandler((error) => {
-              // ALWAYS clear loading state on error
               this.formStates.isSubmitting = false;
               this.notifications.error.show = true;
               this.notifications.error.text = 'خطأ: ' + error.message;
             })
             .saveSettings(this.settings);
+        },
+
+        // Category Management Functions
+        editCategory(cat) {
+          this.categoryForm = {
+            row: cat.row,
+            name: cat.name,
+            icon: cat.icon || '📦',
+            color: cat.color || '#6B7280',
+            active: cat.active !== false
+          };
+          this.showEditCategoryModal = true;
+        },
+
+        deleteCategory(cat) {
+          if (!confirm('هل تريد حذف التصنيف "' + cat.name + '"؟\nسيتم تعطيله وليس حذفه نهائياً.')) {
+            return;
+          }
+          
+          google.script.run
+            .withSuccessHandler((result) => {
+              if (result && result.ok) {
+                this.notifications.success.show = true;
+                this.notifications.success.text = 'تم حذف التصنيف';
+                setTimeout(() => { this.notifications.success.show = false; }, 3000);
+                this.loadCategories();
+              }
+            })
+            .withFailureHandler((error) => {
+              this.notifications.error.show = true;
+              this.notifications.error.text = 'خطأ: ' + error.message;
+            })
+            .SOV1_UI_deleteCategory_('OPEN', cat.row);
+        },
+
+        saveCategory() {
+          if (!this.categoryForm.name.trim()) {
+            alert('اسم التصنيف مطلوب');
+            return;
+          }
+          
+          this.formStates.isSavingCategory = true;
+          
+          if (this.showEditCategoryModal && this.categoryForm.row) {
+            // Update existing
+            google.script.run
+              .withSuccessHandler((result) => {
+                this.formStates.isSavingCategory = false;
+                if (result && result.ok) {
+                  this.closeModals();
+                  this.notifications.success.show = true;
+                  this.notifications.success.text = 'تم تحديث التصنيف';
+                  setTimeout(() => { this.notifications.success.show = false; }, 3000);
+                  this.loadCategories();
+                }
+              })
+              .withFailureHandler((error) => {
+                this.formStates.isSavingCategory = false;
+                alert('خطأ: ' + error.message);
+              })
+              .SOV1_UI_updateCategory_('OPEN', this.categoryForm.row, this.categoryForm.name, this.categoryForm.icon, this.categoryForm.color, this.categoryForm.active);
+          } else {
+            // Add new
+            google.script.run
+              .withSuccessHandler((result) => {
+                this.formStates.isSavingCategory = false;
+                if (result && result.ok) {
+                  this.closeModals();
+                  this.notifications.success.show = true;
+                  this.notifications.success.text = 'تم إضافة التصنيف "' + result.name + '"';
+                  setTimeout(() => { this.notifications.success.show = false; }, 3000);
+                  this.loadCategories();
+                }
+              })
+              .withFailureHandler((error) => {
+                this.formStates.isSavingCategory = false;
+                alert('خطأ: ' + error.message);
+              })
+              .SOV1_UI_addCategory_('OPEN', this.categoryForm.name, this.categoryForm.icon, this.categoryForm.color);
+          }
+        },
+
+        cleanTestCategories() {
+          if (!confirm('هل تريد تنظيف التصنيفات التجريبية؟\nسيتم إزالة التصنيفات التي تحتوي على: test, تجريب, fake, dummy')) {
+            return;
+          }
+          
+          this.formStates.isCleaning = true;
+          
+          google.script.run
+            .withSuccessHandler((result) => {
+              this.formStates.isCleaning = false;
+              this.notifications.success.show = true;
+              this.notifications.success.text = 'تم التنظيف: ' + (result.categories || 0) + ' تصنيف، ' + (result.transactions || 0) + ' عملية، ' + (result.budgets || 0) + ' ميزانية';
+              setTimeout(() => { this.notifications.success.show = false; }, 5000);
+              this.loadCategories();
+            })
+            .withFailureHandler((error) => {
+              this.formStates.isCleaning = false;
+              this.notifications.error.show = true;
+              this.notifications.error.text = 'خطأ في التنظيف: ' + error.message;
+            })
+            .SOV1_CLEAN_TEST_CATEGORIES_();
+        },
+
+        closeModals() {
+          this.showAddCategoryModal = false;
+          this.showEditCategoryModal = false;
+          this.categoryForm = { row: null, name: '', icon: '📦', color: '#6B7280', active: true };
         }
       };
     }

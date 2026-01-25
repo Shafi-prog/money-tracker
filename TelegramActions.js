@@ -243,6 +243,41 @@ function SOV1_handleCallback_(cb) {
         if (uuid === 'today') {
           if (typeof sendTodayReport_ === 'function') sendTodayReport_(chatId);
           else if (typeof SOV1_sendDailyReport_ === 'function') SOV1_sendDailyReport_(chatId);
+        } else if (uuid === 'week') {
+          if (typeof sendPeriodSummary_ === 'function') sendPeriodSummary_(chatId, 'week');
+        } else if (uuid === 'month') {
+          if (typeof sendPeriodSummary_ === 'function') sendPeriodSummary_(chatId, 'month');
+        }
+        return;
+      }
+      
+      // أرصدة الحسابات
+      if (action === 'balances' || data === 'balances') {
+        if (typeof sendAllBalancesToTelegram_ === 'function') {
+          sendAllBalancesToTelegram_(chatId);
+        } else {
+          SOV1_TG_api_('sendMessage', { chat_id: chatId, text: '⚠️ وظيفة الأرصدة غير متاحة حالياً.' });
+        }
+        return;
+      }
+      
+      // آخر N عمليات
+      if (action === 'last') {
+        var n = Number(uuid) || 5;
+        if (typeof sendLastNToTelegram_ === 'function') {
+          sendLastNToTelegram_(chatId, n);
+        } else if (typeof SOV1_sendLastActionCard_ === 'function') {
+          SOV1_sendLastActionCard_(chatId);
+        }
+        return;
+      }
+      
+      // الميزانيات
+      if (action === 'budgets' || data === 'budgets') {
+        if (typeof sendBudgetsSnapshotToTelegram_ === 'function') {
+          sendBudgetsSnapshotToTelegram_();
+        } else {
+          SOV1_TG_api_('sendMessage', { chat_id: chatId, text: '⚠️ وظيفة الميزانيات غير متاحة حالياً.' });
         }
         return;
       }

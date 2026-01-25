@@ -11,7 +11,8 @@ function TG_prop_(k, fallback) {
 }
 
 function getHubChatId_() {
-  var hub = TG_prop_('CHANNEL_ID', '') || TG_prop_('ADMIN_CHAT_ID', '') || TG_prop_('CHAT_ID', '') || (ENV.CHAT_ID || '');
+  // ✅ Fixed: Check TELEGRAM_CHAT_ID first (main property name)
+  var hub = TG_prop_('TELEGRAM_CHAT_ID', '') || TG_prop_('CHANNEL_ID', '') || TG_prop_('ADMIN_CHAT_ID', '') || TG_prop_('CHAT_ID', '') || (ENV.CHAT_ID || '');
   return String(hub || '');
 }
 
@@ -253,7 +254,7 @@ function getMonthlySpendFor_(merchantOrCategory, type) {
 }
 
 /** ===== بطاقة عملية (تُستدعى من Flow) ===== */
-function sendSovereignReportV120(ai, sync, src, raw, destChatId) {
+function sendTransactionReport(ai, sync, src, raw, destChatId) {
   var hub = String(destChatId || getHubChatId_() || '');
   if (!hub) return;
 
@@ -262,15 +263,15 @@ function sendSovereignReportV120(ai, sync, src, raw, destChatId) {
   var category = (ai && ai.category) ? String(ai.category) : 'أخرى';
   var type = (ai && ai.type) ? String(ai.type) : 'حوالة';
   var isIncoming = !!(ai && ai.isIncoming);
-  var budgetRem = Number(sync && sync.budget && sync.budget.remaining ? sync.budget.remaining : 0);
-  var uuid = (ai && ai.uuid) ? String(ai.uuid) : (sync && sync.uuid ? sync.uuid : '');
   var accNum = (ai && ai.accNum) ? String(ai.accNum) : '';
   var cardNum = (ai && ai.cardNum) ? String(ai.cardNum) : '';
   
-  // استخراج رقم الحساب من النص الخام إذا لم يكن متوفراً
-  if (!accNum && raw) {
-    var accMatch = String(raw).match(/من\s*(\d{4})|لـ(\d{4})|حساب\s*(\d{4})/i);
-    if (accMatch) accNum = accMatch[1] || accMatch[2] || accMatch[3] || '';
+  // استخراج رقم الحساب/البطاقة من النص الخام
+  if (!accNum && !cardNum && raw) {
+    var cardMatch = String(raw).match(/\*{2,}(\d{4})/);
+    if (cardMatch) cardNum = cardMatch[1];
+    var accMatch = String(raw).match(/حساب\s*(\d{4})/i);
+    if (accMatch) accNum = accMatch[1];
   }
   
   // استخراج اسم المستلم من النص الخام (حوالات داخلية)
@@ -285,7 +286,7 @@ function sendSovereignReportV120(ai, sync, src, raw, destChatId) {
     var dateMatch = String(raw).match(/(\d{1,2}\/\d{1,2}\/\d{2,4})/);
     if (dateMatch) dateStr = dateMatch[1];
   }
-  if (!dateStr) dateStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yy/M/d');
+  if (!dateStr) dateStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'd/M/yy');
 
   // تحديد نوع العملية للعنوان
   var isTransfer = /حوالة/i.test(type) || /حوالة/i.test(category);
@@ -294,109 +295,82 @@ function sendSovereignReportV120(ai, sync, src, raw, destChatId) {
   
   var operationType = 'عملية';
   if (isTransfer) operationType = 'حوالة';
-  else if (isPurchase) operationType = 'عملية';
   else if (isWithdrawal) operationType = 'سحب';
 
   // الرمز حسب الاتجاه
   var directionEmoji = isIncoming ? '⬇️' : '⬆️';
   
-  // حساب إجمالي المصروف للتاجر/الشخص في فترة الراتب
-  var monthlyStats = null;
+  // حساب إجمالي المصروف للتاجر/الشخص
   var aggregationText = '';
-  
   if (merchant && merchant !== 'غير محدد') {
-    monthlyStats = getMonthlySpendFor_(merchant, 'merchant');
-    
-    // تحديد النص المناسب حسب نوع العملية
+    var monthlyStats = getMonthlySpendFor_(merchant, 'merchant');
     if (monthlyStats && monthlyStats.total > 0) {
       if (isTransfer) {
-        // حوالة: إدانة أو استلام
         if (isIncoming) {
-          aggregationText = '<b>إجمالي ما تم استلامه من ' + escHtml_(merchant) + '</b>\n';
+          aggregationText = 'إجمالي ما تم استلامه من ' + escHtml_(merchant) + '\n';
         } else {
-          aggregationText = '<b>إجمالي ما تم إدانته لـ ' + escHtml_(merchant) + '</b>\n';
+          aggregationText = 'إجمالي ما تم إدانته لـ ' + escHtml_(merchant) + '\n';
         }
       } else {
-        // مشتريات: إجمالي المصروف من المتجر
-        aggregationText = '<b>إجمالي ما تم صرفه من متجر ' + escHtml_(merchant) + '</b>\n';
+        aggregationText = 'إجمالي ما تم صرفه من متجر ' + escHtml_(merchant) + '\n';
       }
-      aggregationText += '💵 ' + monthlyStats.total.toFixed(2) + ' SAR (' + monthlyStats.count + ' عملية)\n';
+      aggregationText += '💵 ' + monthlyStats.total.toFixed(2) + ' SAR (' + monthlyStats.count + ' عملية)';
     }
   }
   
-  // استخراج البنك من النص الخام أو من الحساب
+  // استخراج البنك من النص الخام (حساباتك فقط)
   var bankName = '';
   if (raw) {
     var rawLower = String(raw).toLowerCase();
-    if (/الراجحي|alrajhi/i.test(rawLower)) bankName = 'الراجحي';
-    else if (/الأهلي|alinma/i.test(rawLower)) bankName = 'الأهلي';
-    else if (/الإنماء|alinma/i.test(rawLower)) bankName = 'الإنماء';
-    else if (/الرياض|riyad/i.test(rawLower)) bankName = 'الرياض';
-    else if (/fransi|saudi french|البنك السعودي الفرنسي/i.test(rawLower)) bankName = 'السعودي الفرنسي';
-    else if (/sabb|ساب/i.test(rawLower)) bankName = 'ساب';
-    else if (/bsf|السعودي الفرنسي/i.test(rawLower)) bankName = 'السعودي الفرنسي';
-    else if (/stc pay|stcpay/i.test(rawLower)) bankName = 'STC Pay';
-    else if (/urpay/i.test(rawLower)) bankName = 'urpay';
+    if (/saib|ساب|sabb/i.test(rawLower)) bankName = 'ساب';
+    else if (/الراجحي|alrajhi/i.test(rawLower)) bankName = 'الراجحي';
     else if (/tiqmo/i.test(rawLower)) bankName = 'tiqmo';
-    else if (/mada/i.test(rawLower)) bankName = 'مدى';
+    else if (/tamara|تمارا/i.test(rawLower)) bankName = 'Tamara';
   }
   
-  // التنسيق المطلوب
-  var html =
-    '✅ <b>رصـد مـالـي ' + operationType + '</b>\n' +
-    '━━━━━━━━━━━━━━\n' +
-    '📅 <b>التاريخ:</b> ' + escHtml_(dateStr) + '\n' +
-    '💰 <b>المبلغ:</b> ' + escHtml_(amount.toFixed(2)) + ' SAR ' + directionEmoji + '\n' +
-    '🆔 <b>الحساب:</b> ' + escHtml_(accNum || '-') + '\n';
+  // تحديد الحساب للعرض
+  var accountDisplay = cardNum || accNum || '';
   
-  // إضافة البنك إذا كان متاحاً
+  // ===== التنسيق المطلوب =====
+  var html = '✅ <b>رصـد مـالـي ' + operationType + '</b>\n';
+  html += '━━━━━━━━━━━━━━\n';
+  html += '📅 التاريخ: ' + escHtml_(dateStr) + '\n';
+  html += '💰 المبلغ: <b>' + escHtml_(amount.toFixed(2)) + ' SAR</b> ' + directionEmoji + '\n';
+  
+  if (accountDisplay) {
+    html += '🆔 الحساب: ' + escHtml_(accountDisplay) + '\n';
+  }
   if (bankName) {
-    html += '<b>البنك:</b> ' + escHtml_(bankName) + '\n';
+    html += 'البنك: ' + escHtml_(bankName) + '\n';
   }
   
-  html += '🛒 <b>المتجر:</b> ' + escHtml_(merchant) + '\n' +
-    '🏷️ <b>التصنيف:</b> ' + escHtml_(category) + '\n';
+  html += '🛒 المتجر: ' + escHtml_(merchant) + '\n';
+  html += '🏷️ التصنيف: ' + escHtml_(category) + '\n';
   
-  // إضافة إجمالي المصروف/الإدانة
-  if (aggregationText) {
-    html += aggregationText;
-  }
-  
-  html += '━━━━━━━━━━━━━━\n' +
-    '📝 <b>النص الأصلي:</b>\n<pre>' + escHtml_(String(raw || '').slice(0, 150)) + '</pre>';
-
-  // إضافة أرصدة جميع الحسابات
+  // عرض جميع الأرصدة الحالية
   if (typeof getAllBalancesHTML_ === 'function') {
-    try {
-      var balancesHTML = getAllBalancesHTML_();
-      if (balancesHTML) html += balancesHTML;
-    } catch (balErr) {
-      Logger.log('Error getting balances: ' + balErr);
+    var balancesHTML = getAllBalancesHTML_();
+    if (balancesHTML) {
+      html += balancesHTML;
     }
   }
-
-  // إرسال مع أزرار التعديل والحذف
-  var keyboard = null;
-  var actionsMode = String(ENV.TG_ACTIONS_MODE || 'admin').toLowerCase();
-  var allowActions = (actionsMode === 'all') || (actionsMode === 'admin' && ENV.ADMIN_CHAT_ID && String(hub) === String(ENV.ADMIN_CHAT_ID));
-  if (uuid && allowActions) {
-    keyboard = {
-      inline_keyboard: [
-        [
-          { text: '✏️ تعديل التصنيف', callback_data: 'edit_cat:' + uuid },
-          { text: '🗑️ حذف', callback_data: 'delete:' + uuid }
-        ],
-        [
-          { text: '📊 تقرير اليوم', callback_data: 'report:today' }
-        ]
-      ]
-    };
+  
+  // إجمالي المصروف/الإدانة
+  if (aggregationText) {
+    html += '━━━━━━━━━━━━━━\n';
+    html += aggregationText + '\n';
+  }
+  
+  // النص الأصلي مختصر
+  var rawPreview = String(raw || '').slice(0, 100);
+  if (rawPreview) {
+    html += '━━━━━━━━━━━━━━\n';
+    html += '📝 النص الأصلي:\n';
+    html += '<code>' + escHtml_(rawPreview) + '</code>';
   }
 
-  var opts = { parse_mode: 'HTML' };
-  if (keyboard) opts.reply_markup = JSON.stringify(keyboard);
-  
-  sendTelegramLogged_(hub, html, opts);
+  // ✅ إرسال بدون أزرار - استخدم /commands فقط
+  sendTelegramLogged_(hub, html, { parse_mode: 'HTML' });
 
   var arch = getArchiveChatId_();
   if (arch && arch !== hub) sendTelegramLogged_(arch, html, { parse_mode: 'HTML' });
@@ -499,10 +473,10 @@ function addManualTransaction_(chatId, payload) {
 
   var sync = (typeof insertTransaction_ === 'function')
     ? insertTransaction_(ai, 'MANUAL', 'Manual: ' + s)
-    : syncQuadV120(ai, 'Manual: ' + s, 'MANUAL');
+    : saveTransaction(ai, 'Manual: ' + s, 'MANUAL');
 
   ai.uuid = sync && sync.uuid ? sync.uuid : '';
-  sendSovereignReportV120(ai, sync, 'MANUAL', 'Manual: ' + s, chatId);
+  sendTransactionReport(ai, sync, 'MANUAL', 'Manual: ' + s, chatId);
   sendTelegram_(chatId, '✅ تم تسجيل الإدخال اليدوي');
 }
 
@@ -512,6 +486,7 @@ function sendLastNTransactions_(chatId, n) {
 }
 
 /** ===== إرسال أرصدة جميع الحسابات ===== */
+// Updated via Copilot
 function sendAllBalancesToTelegram_(chatId) {
   chatId = String(chatId || getHubChatId_());
   if (!chatId) return;
@@ -534,8 +509,8 @@ function sendAllBalancesToTelegram_(chatId) {
   
   for (var i = 1; i < data.length; i++) {
     var accountName = String(data[i][0] || '');
-    var balance = Number(data[i][1] || 0);
-    var lastUpdate = data[i][2];
+    var balance = Number(data[i][4] || 0);
+    var lastUpdate = data[i][5];
     total += balance;
     
     var emoji = balance >= 0 ? '💚' : '🔴';
@@ -552,3 +527,6 @@ function sendAllBalancesToTelegram_(chatId) {
   
   sendTelegramLogged_(chatId, html, { parse_mode: 'HTML' });
 }
+
+// Backward compatibility alias
+var sendSovereignReportV120 = sendTransactionReport;

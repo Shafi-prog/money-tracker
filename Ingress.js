@@ -26,6 +26,25 @@ function doPost(e) {
   try {
     var rawBody = (e && e.postData && e.postData.contents) ? String(e.postData.contents) : "";
     
+    // ✅ Security: التحقق من المصادقة (INGRESS_SECRET)
+    // Telegram يستخدم TG_SECRET_TOKEN، SMS يستخدم INGRESS_SECRET
+    if (ENV.INGRESS_SECRET) {
+      var providedSecret = (e && e.parameter && e.parameter.secret) ? e.parameter.secret : null;
+      // محاولة استخراج السر من JSON body أيضاً
+      if (!providedSecret && rawBody && rawBody.charAt(0) === '{') {
+        try {
+          var tempObj = JSON.parse(rawBody);
+          providedSecret = tempObj.secret || tempObj.auth || null;
+        } catch (_) {}
+      }
+      // Telegram updates معفية من هذا الفحص (لديها TG_SECRET_TOKEN)
+      var isTelegramUpdate = rawBody && rawBody.indexOf('update_id') !== -1;
+      if (!isTelegramUpdate && providedSecret !== ENV.INGRESS_SECRET) {
+        logIngressEvent_('WARN', 'doPost_AUTH_FAILED', { hasSecret: !!providedSecret }, 'Unauthorized request blocked');
+        return json_(401, { ok: false, error: 'Unauthorized - invalid or missing secret' });
+      }
+    }
+    
     // ✅ تحقق من Telegram Update أولاً
     if (rawBody && rawBody.charAt(0) === '{') {
       try {
@@ -78,11 +97,11 @@ function doPost(e) {
 
     if (gotLock) {
       try {
-        if (typeof executeUniversalFlowV120 === "function") {
-          executeUniversalFlowV120(text, source, null);
+        if (typeof processTransaction === "function") {
+          processTransaction(text, source, null);
           flowResult = "OK";
         } else {
-          flowError = "executeUniversalFlowV120 غير موجودة";
+          flowError = "processTransaction غير موجودة";
         }
       } catch (flowErr) {
         flowError = String(flowErr);
@@ -373,15 +392,16 @@ function duplicateKey_(req) {
 
 function isDuplicate_(req) {
   var key = "dup:" + duplicateKey_(req);
-  var props = PropertiesService.getScriptProperties();
-  return props.getProperty(key) === "1";
+  // ✅ استخدام CacheService بدلاً من ScriptProperties (مع TTL تلقائي)
+  var cache = CacheService.getScriptCache();
+  return cache.get(key) === "1";
 }
 
 function markDuplicate_(req) {
   var key = "dup:" + duplicateKey_(req);
-  var props = PropertiesService.getScriptProperties();
-  props.setProperty(key, "1");
-  // تنظيف بسيط: لا يوجد TTL في ScriptProperties، يمكن لاحقًا عمل مهمة تنظيف
+  // ✅ CacheService مع TTL = 10 دقائق (يتم الحذف تلقائياً)
+  var cache = CacheService.getScriptCache();
+  cache.put(key, "1", 600); // 600 ثانية = 10 دقائق
 }
 
 /* =====================================================
@@ -483,7 +503,7 @@ function handleTelegramWebhook_(update) {
         var lock = LockService.getScriptLock();
         if (lock.tryLock(5000)) {
            try {
-             executeUniversalFlowV120(text, source, chatId);
+             processTransaction(text, source, chatId);
            } finally {
              lock.releaseLock();
            }
@@ -536,7 +556,7 @@ function isDuplicateTelegramText_(chatId, text) {
 function TEST_TELEGRAM_MESSAGE_() {
   var text = 'شراء انترنت\nمبلغ: SAR 239.05\nبطاقة: *3449 - mada (Ecommerce)\nلدى: MADFU\nفي: 15:19 2026-01-11';
   var chatId = (typeof getHubChatId_ === 'function') ? getHubChatId_() : (ENV.CHAT_ID || ENV.ADMIN_CHAT_ID || ENV.CHANNEL_ID || '');
-  var res = executeUniversalFlowV120(text, 'TEST_TELEGRAM', chatId);
+  var res = processTransaction(text, 'TEST_TELEGRAM', chatId);
   Logger.log(JSON.stringify(res));
   return res;
 }
@@ -612,18 +632,44 @@ function handleTelegramCommand_(chatId, text, msg) {
     case '/مساعدة':
       sendTelegram_(chatId, 
         "📋 <b>الأوامر المتاحة:</b>\n\n" +
-        "/menu - إظهار لوحة التحكم\n" +
-        "/today - تقرير اليوم\n" +
-        "/week - تقرير الأسبوع\n" +
-        "/month - تقرير الشهر\n" +
-        "/last - آخر عملية\n" +
-        "/budgets - ملخص الميزانية\n" +
-        "/balances - أرصدة جميع الحسابات 💳\n" +
-        "/search - بحث في المعاملات\n" +
-        "/add - إضافة معاملة يدوياً\n\n" +
-        "💡 <b>لمعالجة رسالة SMS:</b>\n" +
-        "فقط الصقها هنا وسيتم معالجتها تلقائياً!"
+        "/start - بدء\n" +
+        "/help - المساعدة\n" +
+        "/balances - أرصدة الحسابات 💰\n" +
+        "/last - آخر 5 عمليات\n" +
+        "/summary - ملخص الشهر\n" +
+        "/budgets - الميزانيات\n" +
+        "/debts - الديون\n" +
+        "/add - إضافة يدوية\n" +
+        "/test - اختبار الاتصال 🔧"
       );
+      break;
+
+    case '/test':
+    case '/اختبار':
+      sendTelegram_(chatId, '✅ متصل!\n\n🤖 البوت يعمل بنجاح.\n📅 ' + new Date().toLocaleString('ar-SA'));
+      break;
+
+    case '/summary':
+    case '/ملخص':
+      if (typeof sendPeriodSummary_ === "function") sendPeriodSummary_(chatId, 'month');
+      break;
+
+    case '/debts':
+    case '/ديون':
+      if (typeof getDebtSummary_ === 'function') {
+        var debts = getDebtSummary_();
+        if (debts && debts.length > 0) {
+          var msg = '🤝 <b>الديون:</b>\n\n';
+          debts.forEach(function(d) {
+            msg += (d.amount > 0 ? '🔴 ' : '🟢 ') + d.person + ': ' + Math.abs(d.amount).toFixed(2) + ' SAR\n';
+          });
+          sendTelegram_(chatId, msg);
+        } else {
+          sendTelegram_(chatId, '✅ لا توجد ديون مسجلة.');
+        }
+      } else {
+        sendTelegram_(chatId, '⚠️ وظيفة الديون غير متاحة.');
+      }
       break;
 
     case '/status':

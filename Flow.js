@@ -1,22 +1,22 @@
 
 /********** Flow.gs — Sovereign Financial System **********
- * - executeUniversalFlowV120: المعالجة الأساسية (يُستدعى من Queue Worker)
- * - syncQuadV120: كتابة Sheet1 + تحديث Budgets + (اختياري) Debt_Ledger + Dashboard(raw)
+ * - processTransaction: المعالجة الأساسية (يُستدعى من Queue Worker)
+ * - saveTransaction: كتابة Sheet1 + تحديث Budgets + (اختياري) Debt_Ledger + Dashboard(raw)
  *
- * ✅ تعديل مهم: syncQuadV120 الآن يحدّث "الرصيد" في Debt_Ledger (عمود E)
+ * ✅ تعديل مهم: saveTransaction الآن يحدّث "الرصيد" في Debt_Ledger (عمود E)
  *   - الصف 2: =D2-C2
  *   - الصف 3+: =E(الصف السابق)+D(الصف)-C(الصف)
  ****************************************************/
 
 /** هل العملية تحويل داخلي؟ */
-function SOV1_isInternalTransfer_(data) {
+function isInternalTransfer_(data) {
   var cat = String((data && data.category) ? data.category : '');
   var typ = String((data && data.type) ? data.type : '');
   return (cat.indexOf('حوالة داخلية') !== -1) || (typ.indexOf('تحويل داخلي') !== -1);
 }
 
 /** Parser احتياطي سريع إذا لم يوجد AI/Templates */
-function SOV1_preParseFallback_(text) {
+function parseBasicSMS_(text) {
   var t = String(text || '').replace(/\s+/g, ' ').trim();
 
   // أنماط متعددة لاستخراج المبلغ
@@ -75,7 +75,7 @@ function SOV1_preParseFallback_(text) {
   };
 }
 
-function executeUniversalFlowV120(smsText, source, destChatId) {
+function processTransaction(smsText, source, destChatId) {
   try {
     smsText = String(smsText || '');
     source = String(source || 'غير معروف');
@@ -98,12 +98,14 @@ function executeUniversalFlowV120(smsText, source, destChatId) {
           };
         }
       }
-    } catch (eTpl) {}
+    } catch (eTpl) {
+      Logger.log('Template parsing error: ' + eTpl.message);
+    }
 
     // 2) AI (إن وجد) وإلا fallback
     if (!ai) {
-      if (typeof callAiHybridV120 === 'function') ai = callAiHybridV120(smsText);
-      else ai = SOV1_preParseFallback_(smsText);
+      if (typeof classifyWithAI === 'function') ai = classifyWithAI(smsText);
+      else ai = parseBasicSMS_(smsText);
     }
 
     // 3) Apply classifier map and smart rules (conditional on settings)
@@ -128,7 +130,11 @@ function executeUniversalFlowV120(smsText, source, destChatId) {
 
     // 4) Accounts (إن وجد) لتحديد التحويل الداخلي
     try {
-      if (typeof classifyAccountFromText_ === 'function' && typeof SOV1_extractFingerprintParts_ === 'function') {
+      // ✅ NEW: Use DataLinkage for account enrichment
+      if (typeof enrichTransactionWithAccountInfo_ === 'function') {
+        ai.raw = smsText; // Needed for extraction
+        ai = enrichTransactionWithAccountInfo_(ai);
+      } else if (typeof classifyAccountFromText_ === 'function' && typeof SOV1_extractFingerprintParts_ === 'function') {
         var parts = SOV1_extractFingerprintParts_(smsText);
         var acc = classifyAccountFromText_(smsText, parts.cardLast);
         if (acc && acc.hit) {
@@ -136,29 +142,39 @@ function executeUniversalFlowV120(smsText, source, destChatId) {
           if (acc.isInternal) { ai.category = 'حوالة داخلية'; ai.type = 'تحويل داخلي'; }
         }
       }
-    } catch (eA) {}
+      
+      // ✅ Extract card/account numbers from SMS
+      if (!ai.accNum && typeof extractAccountFromText_ === 'function') {
+        ai.accNum = extractAccountFromText_(smsText) || '';
+      }
+      if (!ai.cardNum && typeof extractCardFromText_ === 'function') {
+        ai.cardNum = extractCardFromText_(smsText) || '';
+      }
+    } catch (eA) {
+      Logger.log('Account extraction error: ' + eA);
+    }
 
     // 5) sync - ✅ استخدام نظام UUID الجديد إذا متاح
     var sync;
     if (typeof insertTransaction_ === 'function') {
       sync = insertTransaction_(ai, source, smsText);
     } else {
-      sync = syncQuadV120(ai, smsText, source);
+      sync = saveTransaction(ai, smsText, source);
     }
 
     // 6) send report
     try {
-      if (typeof sendSovereignReportV120 === 'function') {
+      if (typeof sendTransactionReport === 'function') {
         // تمرير UUID للتقرير
         ai.uuid = sync.uuid || null;
-        sendSovereignReportV120(ai, sync, source, smsText, destChatId);
+        sendTransactionReport(ai, sync, source, smsText, destChatId);
       }
     } catch (eS) {}
     
     return sync;
 
   } catch (err) {
-    logIngressEvent_('ERROR', 'executeUniversalFlowV120', { error: String(err), source: source }, smsText);
+    logIngressEvent_('ERROR', 'processTransaction', { error: String(err), source: source }, smsText);
     return null;
   }
 }
@@ -179,13 +195,38 @@ function ensureBudgetRowExists_(category) {
 }
 
 /**
- * ✅ syncQuadV120 (معدل):
+ * ✅ saveTransaction (معدل):
  * - Sheet1: appendRow
  * - Budgets: تحديث مصروف التصنيف (إلا إذا تحويل داخلي)
  * - Debt_Ledger: إذا تحويل داخلي -> appendRow + تحديث الرصيد (E) بصيغة
  * - Dashboard raw: اختياري
  */
-function syncQuadV120(data, raw, source) {
+function saveTransaction(data, raw, source) {
+  // ✅ Input Validation - التحقق من صحة البيانات
+  data = data || {};
+  
+  // تنظيف وتحقق من المبلغ
+  var amount = Math.abs(Number(data.amount) || 0);
+  if (amount > 10000000) {
+    Logger.log('Warning: Unusually large amount detected: ' + amount);
+    amount = 0; // رفض المبالغ الضخمة غير المنطقية
+  }
+  
+  // تنظيف النصوص من الأحرف الخطرة
+  var sanitizeString = function(s, maxLen) {
+    s = String(s || '').trim();
+    // إزالة أحرف التحكم والـ HTML tags
+    s = s.replace(/[<>\"\'\\]/g, '').replace(/[\x00-\x1F\x7F]/g, '');
+    return s.slice(0, maxLen || 200);
+  };
+  
+  var merchant = sanitizeString(data.merchant, 100) || 'غير محدد';
+  var category = sanitizeString(data.category, 50) || 'أخرى';
+  var type = sanitizeString(data.type, 30) || 'حوالة';
+  var accNum = sanitizeString(data.accNum, 20);
+  var cardNum = sanitizeString(data.cardNum, 20);
+  source = sanitizeString(source, 50) || 'غير معروف';
+  
   var now = new Date();
 
   var s1 = _sheet('Sheet1');
@@ -200,57 +241,68 @@ function syncQuadV120(data, raw, source) {
     'اليوم',
     'الأسبوع',
     source,
-    data.accNum || '',
-    data.cardNum || '',
-    Number(data.amount) || 0,
-    data.merchant || '',
-    data.category || '',
-    data.type || '',
-    raw
+    accNum,
+    cardNum,
+    amount,
+    merchant,
+    category,
+    type,
+    String(raw || '').slice(0, 1000) // حد أقصى للنص الخام
   ]);
 
   // 2) Budgets — تجاهل التحويل الداخلي (لا يُحسب مصروف/دخل)
-  var internal = SOV1_isInternalTransfer_(data);
+  var internal = isInternalTransfer_({ category: category, type: type });
   var bRem = 0;
 
   if (!internal) {
-    try {
-      ensureBudgetRowExists_(data.category);
+    // ✅ استخدام Lock لمنع race condition في تحديث الميزانية
+    var budgetLock = LockService.getScriptLock();
+    var gotBudgetLock = budgetLock.tryLock(3000); // انتظر 3 ثواني
+    
+    if (gotBudgetLock) {
+      try {
+        ensureBudgetRowExists_(category);
 
-      // Batch read
-      var bData = sB.getDataRange().getValues();
-      var rowIdx = -1;
-      for (var i = 1; i < bData.length; i++) {
-        if (String(bData[i][0] || '') === String(data.category || '')) { rowIdx = i + 1; break; }
-      }
-
-      if (rowIdx > 0) {
-        var curSpent = Number(bData[rowIdx - 1][2]) || 0;
-        var delta = data.isIncoming ? -(Number(data.amount) || 0) : (Number(data.amount) || 0);
-        sB.getRange(rowIdx, 3).setValue(curSpent + delta);
-        SpreadsheetApp.flush();
-        bRem = Number(sB.getRange(rowIdx, 4).getValue()) || 0;
-      }
-      
-      // Recalculate ONLY the affected category using salary period
-      if (typeof recalculateBudgetSpent_ === 'function') {
-        try {
-          recalculateBudgetSpent_();
-        } catch (eRecalc) {
-          Logger.log('Budget recalculation skipped: ' + eRecalc);
+        // Batch read
+        var bData = sB.getDataRange().getValues();
+        var rowIdx = -1;
+        for (var i = 1; i < bData.length; i++) {
+          if (String(bData[i][0] || '') === category) { rowIdx = i + 1; break; }
         }
+
+        if (rowIdx > 0) {
+          var curSpent = Number(bData[rowIdx - 1][2]) || 0;
+          var delta = data.isIncoming ? -amount : amount;
+          sB.getRange(rowIdx, 3).setValue(curSpent + delta);
+          SpreadsheetApp.flush();
+          bRem = Number(sB.getRange(rowIdx, 4).getValue()) || 0;
+        }
+        
+        // Recalculate ONLY the affected category using salary period
+        if (typeof recalculateBudgetSpent_ === 'function') {
+          try {
+            recalculateBudgetSpent_();
+          } catch (eRecalc) {
+            Logger.log('Budget recalculation skipped: ' + eRecalc);
+          }
+        }
+      } catch (eB) {
+        Logger.log('Budget update error: ' + eB.message);
+      } finally {
+        budgetLock.releaseLock();
       }
-    } catch (eB) {}
+    } else {
+      Logger.log('Could not acquire budget lock - skipping budget update');
+    }
   }
 
   // 3) Debt_Ledger — ✅ تحديث الرصيد في العمود E
   var dBal = 0;
   try {
     if (internal) {
-      var amt = Number(data.amount) || 0;
-      var party = data.merchant || 'تحويل داخلي';
-      var debtor = data.isIncoming ? amt : 0;    // مدين
-      var creditor = data.isIncoming ? 0 : amt;  // دائن
+      var party = merchant;
+      var debtor = data.isIncoming ? amount : 0;    // مدين
+      var creditor = data.isIncoming ? 0 : amount;  // دائن
       var desc = (data.isIncoming ? 'حوالة داخلية واردة' : 'حوالة داخلية صادرة') + ' - ' + party;
 
       // أضف الصف
@@ -268,14 +320,45 @@ function syncQuadV120(data, raw, source) {
       }
 
       SpreadsheetApp.flush();
-      try { dBal = Number(sD.getRange(lastRow, 5).getValue()) || 0; } catch (e1) {}
+      try { dBal = Number(sD.getRange(lastRow, 5).getValue()) || 0; } catch (e1) {
+        Logger.log('Debt balance read error: ' + e1.message);
+      }
     }
-  } catch (eD) {}
+  } catch (eD) {
+    Logger.log('Debt ledger update error: ' + eD.message);
+  }
 
   // 4) Dashboard raw (اختياري)
   try {
-    sDash.appendRow([now, data.merchant || '', Number(data.amount) || 0, data.category || '', source]);
-  } catch (eDash) {}
+    sDash.appendRow([now, merchant, amount, category, source]);
+  } catch (eDash) {
+    Logger.log('Dashboard append error: ' + eDash.message);
+  }
+
+  // 5) ✅ تحديث الأرصدة وتتبع الديون
+  try {
+    if (typeof updateBalancesAfterTransaction_ === 'function') {
+      updateBalancesAfterTransaction_({
+        accNum: accNum,
+        cardNum: cardNum,
+        merchant: merchant,
+        amount: amount,
+        isIncoming: data.isIncoming,
+        category: category,
+        type: type
+      });
+    }
+  } catch (eBalance) {
+    Logger.log('Balance update error: ' + eBalance.message);
+  }
 
   return { budget: bRem, debt: dBal, internal: internal };
 }
+
+// ============================================================================
+// BACKWARD COMPATIBILITY ALIASES (for tests and archived code)
+// ============================================================================
+var executeUniversalFlowV120 = processTransaction;
+var syncQuadV120 = saveTransaction;
+var SOV1_preParseFallback_ = parseBasicSMS_;
+var SOV1_isInternalTransfer_ = isInternalTransfer_;

@@ -57,9 +57,9 @@ function insertMonthlySalary() {
     cardNum: ''
   };
 
-  var sync = syncQuadV120(ai, 'راتب شهري ' + amt, 'راتب_مجدوَل');
-  if (typeof sendSovereignReportV120 === 'function') {
-    sendSovereignReportV120(ai, sync, 'راتب_مجدوَل', 'راتب شهري ' + amt, ENV.CHAT_ID);
+  var sync = saveTransaction(ai, 'راتب شهري ' + amt, 'راتب_مجدوَل');
+  if (typeof sendTransactionReport === 'function') {
+    sendTransactionReport(ai, sync, 'راتب_مجدوَل', 'راتب شهري ' + amt, ENV.CHAT_ID);
   }
 }
 

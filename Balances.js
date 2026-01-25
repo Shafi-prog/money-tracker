@@ -2,40 +2,64 @@
 /********** Balances.gs — أرصدة الحسابات (تقديري) **********
  * - يسجل رصيد لكل حساب/محفظة بناءً على العمليات
  * - يرسل إشعار بالمتبقي للحساب الأساسي (مثلاً الراجحي) عند التحويل/الخصم
+ * 
+ * ⚠️ UPDATED: Now uses unified Accounts sheet (not separate Balances/Account_Balances)
+ * Balance is stored in column 5 (الرصيد) of Accounts sheet
  *******************************************************/
 
+/**
+ * Ensure Accounts sheet exists with balance column
+ */
 function ensureBalancesSheet_() {
-  var sh = _sheet('Account_Balances');
+  var sh = _sheet('Accounts');
   if (sh.getLastRow() === 0) {
-    sh.appendRow(['الحساب', 'الرصيد', 'آخر تحديث']);
+    sh.appendRow(['الاسم', 'النوع', 'الرقم', 'البنك', 'الرصيد', 'آخر_تحديث', 'حسابي', 'SMS_Pattern', 'أسماء_بديلة', 'ملاحظات']);
     sh.setFrozenRows(1);
     sh.setRightToLeft(true);
-    sh.getRange('B:B').setNumberFormat('#,##0.00');
-    sh.getRange('C:C').setNumberFormat('yyyy-MM-dd HH:mm:ss');
+    sh.getRange('E:E').setNumberFormat('#,##0.00');  // الرصيد
+    sh.getRange('F:F').setNumberFormat('yyyy-MM-dd HH:mm:ss');  // آخر_تحديث
   }
   return sh;
 }
 
+/**
+ * Get balance for an account by its number (last 4 digits)
+ */
 function getBalance_(accountKey) {
   var sh = ensureBalancesSheet_();
-  var data = sh.getDataRange().getValues();
-  for (var i=1;i<data.length;i++){
-    if (String(data[i][0]||'') === String(accountKey||'')) return Number(data[i][1]||0);
+  var lastRow = sh.getLastRow();
+  if (lastRow < 2) return 0;
+  
+  // Column C = الرقم, Column E = الرصيد
+  var data = sh.getRange(2, 3, lastRow - 1, 3).getValues(); // C, D, E
+  for (var i = 0; i < data.length; i++) {
+    if (String(data[i][0] || '') === String(accountKey || '')) {
+      return Number(data[i][2] || 0); // Column E
+    }
   }
   return 0;
 }
 
+/**
+ * Set balance for an account
+ */
 function setBalance_(accountKey, newBalance) {
   var sh = ensureBalancesSheet_();
-  var data = sh.getDataRange().getValues();
-  for (var i=1;i<data.length;i++){
-    if (String(data[i][0]||'') === String(accountKey||'')) {
-      sh.getRange(i+1, 2).setValue(Number(newBalance||0));
-      sh.getRange(i+1, 3).setValue(new Date());
-      return;
+  var lastRow = sh.getLastRow();
+  
+  if (lastRow >= 2) {
+    var data = sh.getRange(2, 3, lastRow - 1, 1).getValues(); // Column C (الرقم)
+    for (var i = 0; i < data.length; i++) {
+      if (String(data[i][0] || '') === String(accountKey || '')) {
+        sh.getRange(i + 2, 5).setValue(Number(newBalance || 0));  // Column E (الرصيد)
+        sh.getRange(i + 2, 6).setValue(new Date());  // Column F (آخر_تحديث)
+        return;
+      }
     }
   }
-  sh.appendRow([String(accountKey||''), Number(newBalance||0), new Date()]);
+  
+  // Account not found, add it
+  sh.appendRow(['حساب ' + accountKey, 'حساب', String(accountKey || ''), '', Number(newBalance || 0), new Date(), 'TRUE', '', '', '']);
 }
 
 /**
@@ -52,20 +76,28 @@ function applyTxnToBalance_(accountKey, amount, isIncoming) {
 }
 
 /**
- * الحصول على جميع أرصدة الحسابات
+ * الحصول على جميع أرصدة الحسابات من Accounts sheet
  * @returns {Array} مصفوفة من الحسابات مع أرصدتها
  */
-function getAllBalances_() {
+function getAccountsWithBalances_() {
   var sh = ensureBalancesSheet_();
-  var data = sh.getDataRange().getValues();
+  var lastRow = sh.getLastRow();
   var balances = [];
   
-  for (var i = 1; i < data.length; i++) {
-    if (data[i][0]) {
+  if (lastRow < 2) return balances;
+  
+  // Columns: الاسم(1), النوع(2), الرقم(3), البنك(4), الرصيد(5), آخر_تحديث(6)
+  var data = sh.getRange(2, 1, lastRow - 1, 6).getValues();
+  
+  for (var i = 0; i < data.length; i++) {
+    if (data[i][2]) { // Has account number
       balances.push({
-        account: String(data[i][0] || ''),
-        balance: Number(data[i][1] || 0),
-        lastUpdate: data[i][2] || null
+        name: String(data[i][0] || ''),
+        type: String(data[i][1] || ''),
+        account: String(data[i][2] || ''),
+        bank: String(data[i][3] || ''),
+        balance: Number(data[i][4] || 0),
+        lastUpdate: data[i][5] || null
       });
     }
   }
@@ -102,20 +134,144 @@ function getAllBalancesHTML_() {
   
   if (data.length < 2) return '';
   
-  var html = '\n━━━━━━━━━━━━━━\n<b>💳 الأرصدة الحالية (تقديرية)</b>\n';
+  var html = '\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n<b>💳 الأرصدة</b>\n';
   var total = 0;
   
+  // Columns: الاسم(0), النوع(1), الرقم(2), البنك(3), الرصيد(4)
   for (var i = 1; i < data.length; i++) {
     var accountName = String(data[i][0] || '');
-    var balance = Number(data[i][1] || 0);
+    var isMine = String(data[i][6] || 'TRUE').toLowerCase() === 'true';
+    if (!isMine) continue; // Only show my accounts
+    
+    var balance = Number(data[i][4] || 0); // Column E = index 4
     total += balance;
     
-    var emoji = balance >= 0 ? '💚' : '🔴';
-    html += emoji + ' <b>' + escHtml_(accountName) + ':</b> ' + balance.toFixed(2) + ' SAR\n';
+    var emoji = balance >= 1000 ? '💚' : (balance >= 0 ? '💛' : '🔴');
+    html += emoji + ' ' + accountName + ': ' + balance.toFixed(0) + '\n';
   }
   
-  html += '━━━━━━━━━━━━━━\n';
-  html += '<b>💰 الإجمالي:</b> ' + total.toFixed(2) + ' SAR';
+  html += '<b>💰 ' + total.toFixed(0) + ' SAR</b>';
   
   return html;
+}
+
+/**
+ * تحديث أرصدة الحسابات بعد كل معاملة
+ * يتم استدعاؤها من saveTransaction
+ */
+function updateBalancesAfterTransaction_(data) {
+  try {
+    var accNum = data.accNum || data.cardNum || '';
+    if (!accNum) return;
+    
+    var amount = Number(data.amount) || 0;
+    var isIncoming = !!data.isIncoming;
+    
+    // تحديث رصيد الحساب
+    var newBalance = applyTxnToBalance_(accNum, amount, isIncoming);
+    
+    // تتبع الديون إذا كانت حوالة لشخص
+    if (data.merchant && data.merchant !== 'غير محدد') {
+      updateDebtTracking_(data);
+    }
+    
+    return newBalance;
+  } catch (e) {
+    Logger.log('Error updating balance: ' + e);
+    return null;
+  }
+}
+
+/**
+ * تتبع الديون - من أقرضت ومن يدين لي
+ */
+function updateDebtTracking_(data) {
+  try {
+    var sDebt = _sheet('Debt_Index');
+    if (sDebt.getLastRow() === 0) {
+      sDebt.appendRow(['الشخص', 'الحساب', 'المبلغ المستحق', 'آخر تحديث', 'ملاحظات']);
+      sDebt.setFrozenRows(1);
+      sDebt.setRightToLeft(true);
+    }
+    
+    var person = String(data.merchant || '').trim();
+    var accNum = String(data.accNum || data.cardNum || '').trim();
+    var amount = Number(data.amount) || 0;
+    var isIncoming = !!data.isIncoming;
+    
+    // إذا دفعت لشخص = هو يدين لي (+)
+    // إذا استلمت من شخص = سدد دينه (-)
+    var delta = isIncoming ? -amount : amount;
+    
+    // البحث عن الشخص بالاسم + رقم الحساب
+    var vals = sDebt.getDataRange().getValues();
+    var foundRow = -1;
+    
+    for (var i = 1; i < vals.length; i++) {
+      var rowPerson = String(vals[i][0] || '').trim().toLowerCase();
+      var rowAcc = String(vals[i][1] || '').trim();
+      
+      // مطابقة بالاسم أو رقم الحساب
+      if (rowPerson === person.toLowerCase() || (accNum && rowAcc === accNum)) {
+        foundRow = i + 1;
+        break;
+      }
+    }
+    
+    if (foundRow > 0) {
+      var currentDebt = Number(vals[foundRow - 1][2]) || 0;
+      var newDebt = currentDebt + delta;
+      
+      // إذا الدين صفر أو قريب منه، اعتبره مسدد
+      if (Math.abs(newDebt) < 1) newDebt = 0;
+      
+      sDebt.getRange(foundRow, 3).setValue(newDebt);
+      sDebt.getRange(foundRow, 4).setValue(new Date());
+      
+      Logger.log('Debt updated: ' + person + ' → ' + newDebt);
+    } else if (Math.abs(delta) > 0) {
+      // إضافة سجل جديد
+      sDebt.appendRow([person, accNum, delta, new Date(), '']);
+      Logger.log('New debt record: ' + person + ' → ' + delta);
+    }
+  } catch (e) {
+    Logger.log('Error updating debt: ' + e);
+  }
+}
+
+/**
+ * الحصول على ملخص الديون
+ */
+function getDebtSummary_() {
+  var sDebt = _sheet('Debt_Index');
+  var data = sDebt.getDataRange().getValues();
+  
+  var owedToMe = 0; // يدينون لي
+  var iOwe = 0;      // أدين لهم
+  var people = [];
+  
+  for (var i = 1; i < data.length; i++) {
+    var debt = Number(data[i][2]) || 0;
+    if (Math.abs(debt) < 1) continue; // تجاهل المبالغ الصغيرة
+    
+    if (debt > 0) {
+      owedToMe += debt;
+    } else {
+      iOwe += Math.abs(debt);
+    }
+    
+    people.push({
+      name: data[i][0],
+      account: data[i][1],
+      amount: debt,
+      lastUpdate: data[i][3]
+    });
+  }
+  
+  return {
+    owedToMe: owedToMe,
+    iOwe: iOwe,
+    net: owedToMe - iOwe,
+    people: people
+  };
 }

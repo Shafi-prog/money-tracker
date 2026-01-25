@@ -123,3 +123,36 @@ function formatDate_(d, pattern) {
     return '';
   }
 }
+
+/** محلّل مدخلات عام: Telegram JSON أو JSON عام {text:"..."} أو نص عادي */
+function _parseIncoming_(raw) {
+  if (!raw) return { kind: 'none' };
+  var s = String(raw).trim();
+
+  if (s.charAt(0) === '{') {
+    try {
+      var obj = JSON.parse(s);
+
+      // Telegram-like?
+      if (obj.update_id || obj.message || obj.channel_post || obj.callback_query) {
+        return { kind: 'telegram', update: obj };
+      }
+
+      // Generic JSON -> text/body/message/content
+      var txt = obj.text || obj.message || obj.body || obj.content;
+      if (typeof txt === 'string' && txt.length) return { kind: 'text', text: txt };
+
+    } catch (e) {
+      // treat as plain text
+    }
+  }
+  return { kind: 'text', text: raw };
+}
+
+/** فحص تكرار باستخدام Cache (إصدار V120) */
+function isDuplicateV120(key) {
+  var cache = CacheService.getScriptCache();
+  if (cache.get(key)) return true;
+  cache.put(key, '1', 600);
+  return false;
+}

@@ -139,7 +139,7 @@ function applySmartRules_(rawText, ai) {
 
     // استخراج تاجر من نص الرسالة إذا كان غير محدد
     if (!merchant || merchant === 'غير محدد') {
-      var m1 = text.match(/لدى[:،]?\s*([^\n]+)/i) || text.match(/لـ\d+;([^\n]+)/i);
+      var m1 = text.match(/لدى[:،]?\s*([^\n]+)/i) || text.match(/لـ\d+;([^\n]+)/i) || text.match(/من:\s*([^\n]+)/i);
       if (m1) merchant = String(m1[1] || '').trim();
       if (merchant) ai.merchant = merchant;
     }
@@ -148,22 +148,211 @@ function applySmartRules_(rawText, ai) {
     var currency = detectCurrency_(text);
     if (currency) ai.currency = currency;
 
-    // تصنيف حسب العملة
+    // ========== SPECIAL TRANSACTION TYPES ==========
+    
+    // OTP / Verification Code / رمز مؤقت / رمز التحقق
+    if (/رمز مؤقت|رمز التحقق|OTP\s*\)/i.test(text)) {
+      ai.category = 'تحقق';
+      ai.type = 'رمز تحقق';
+      ai.isOTP = true;
+      ai.isIncoming = false;
+      // Don't include OTPs in spending calculations
+      ai.excludeFromStats = true;
+      return ai;
+    }
+    
+    // Declined / رفض / رصيد غير كافي
+    if (/رصيد غير كافي|Declined|declined|insufficient/i.test(text)) {
+      ai.category = 'مرفوضة';
+      ai.type = 'رفض';
+      ai.status = 'declined';
+      return ai;
+    }
+    
+    // Refund / استرداد
+    if (/استرداد|استرجاع|Reverse|Refund|refunded/i.test(text)) {
+      ai.category = 'استرداد';
+      ai.type = 'استرداد';
+      ai.isIncoming = true;
+      return ai;
+    }
+    
+    // Loan Payment / قسط تمويل
+    if (/قسط تمويل|المبلغ المتبقي/i.test(text)) {
+      ai.category = 'قسط تمويل';
+      ai.type = 'قسط';
+      ai.isIncoming = false;
+      ai.isLoanPayment = true;
+      return ai;
+    }
+    
+    // Tamara / Installments / أقساط
+    if (/تمارا|Tamara|دفعة قادمة|مقسمة إلى|تأكيد دفعة/i.test(text)) {
+      ai.category = 'أقساط';
+      ai.type = ai.type || 'قسط';
+      ai.isInstallment = true;
+      return ai;
+    }
+    
+    // Housing Support / دعم سكني
+    if (/دعم سكني|إيداع دعم/i.test(text)) {
+      ai.category = 'دعم حكومي';
+      ai.type = 'إيداع';
+      ai.isIncoming = true;
+      return ai;
+    }
+    
+    // Salary / راتب
+    if (/وزارة التعليم|SAUDI ARABIAN MONETARY|راتب/i.test(text)) {
+      ai.category = 'راتب';
+      ai.type = 'حوالة';
+      ai.isIncoming = true;
+      return ai;
+    }
+    
+    // Transfer between own accounts / حوالة بين حساباتك
+    if (/حوالة بين حساباتك/i.test(text)) {
+      ai.category = 'تحويل داخلي';
+      ai.type = 'حوالة داخلية';
+      ai.isInternal = true;
+      return ai;
+    }
+    
+    // Internal Transfer / حوالة داخلية صادرة/واردة
+    if (/حوالة داخلية صادرة|حوالة داخلية واردة/i.test(text)) {
+      ai.category = 'تحويل داخلي';
+      ai.type = 'حوالة';
+      ai.isIncoming = /واردة/i.test(text);
+      return ai;
+    }
+    
+    // Local Transfer / حوالة محلية صادرة/واردة
+    if (/حوالة محلية صادرة/i.test(text)) {
+      ai.category = 'حوالات صادرة';
+      ai.type = 'حوالة';
+      ai.isIncoming = false;
+      return ai;
+    }
+    if (/حوالة محلية واردة|حوالة واردة/i.test(text)) {
+      ai.category = 'حوالات واردة';
+      ai.type = 'حوالة';
+      ai.isIncoming = true;
+      return ai;
+    }
+    
+    // Outgoing Transfer / حوالة صادرة
+    if (/حوالة صادرة/i.test(text)) {
+      ai.category = 'حوالات صادرة';
+      ai.type = 'حوالة';
+      ai.isIncoming = false;
+      return ai;
+    }
+    
+    // ATM Withdrawal / سحب صراف
+    if (/سحب.*صراف|صراف آلي|ATM/i.test(text)) {
+      ai.category = 'سحب نقدي';
+      ai.type = 'سحب';
+      ai.isIncoming = false;
+      return ai;
+    }
+    
+    // Add Money / إضافة أموال (topup)
+    if (/إضافة أموال|Add Money|شحن رصيد/i.test(text)) {
+      ai.category = 'شحن رصيد';
+      ai.type = 'إضافة';
+      ai.isIncoming = true;
+      return ai;
+    }
+    
+    // ========== MERCHANT-BASED CATEGORIES ==========
+    var merchantLower = merchant.toLowerCase();
+    
+    // Digital Wallets / محافظ (tiqmo فقط)
+    if (/tiqmo/i.test(merchantLower + ' ' + t)) {
+      ai.category = 'محافظ';
+      ai.type = ai.type || 'شحن';
+    }
+    // Fuel / وقود
+    else if (/naft|بنزين|محطة|gas\s*stat/i.test(merchantLower + ' ' + t)) {
+      ai.category = 'وقود';
+      ai.type = ai.type || 'مشتريات';
+    }
+    // Transport / نقل
+    else if (/hala|uber|careem|نقل|مواصلات/i.test(merchantLower + ' ' + t)) {
+      ai.category = 'نقل';
+      ai.type = ai.type || 'مشتريات';
+    }
+    // Food / طعام
+    else if (/kudu|halawyat|dunkin|daily\s*fo|tamwinat|tamwenat|taem|pizza|coffee|bakery|مطعم|طعام|food/i.test(merchantLower + ' ' + t)) {
+      ai.category = 'طعام';
+      ai.type = ai.type || 'مشتريات';
+    }
+    // Shopping / تسوق
+    else if (/amazon|panda|aliexpress|alsaif|amtiaz|dukan|family|تسوق/i.test(merchantLower + ' ' + t)) {
+      ai.category = 'تسوق';
+      ai.type = ai.type || 'مشتريات';
+    }
+    // Entertainment / ترفيه
+    else if (/movie|cinema|سينما|ترفيه/i.test(merchantLower + ' ' + t)) {
+      ai.category = 'ترفيه';
+      ai.type = ai.type || 'مشتريات';
+    }
+    // Travel / سفر
+    else if (/united\s*ti|flyadeal|flynas|nusuk|طيران|سفر/i.test(merchantLower + ' ' + t)) {
+      ai.category = 'سفر';
+      ai.type = ai.type || 'مشتريات';
+    }
+    // Bills / فواتير
+    else if (/saudi electricity|electricity|كهرباء|مياه|فاتورة|سداد/i.test(merchantLower + ' ' + t)) {
+      ai.category = 'فواتير';
+      ai.type = ai.type || 'سداد';
+    }
+    // Donations / تبرعات
+    else if (/donation|تبرع/i.test(merchantLower + ' ' + t)) {
+      ai.category = 'تبرعات';
+      ai.type = ai.type || 'شراء';
+    }
+    // Subscriptions / اشتراكات
+    else if (/01\.ai|netflix|spotify|اشتراك/i.test(merchantLower + ' ' + t)) {
+      ai.category = 'اشتراكات';
+      ai.type = ai.type || 'مشتريات';
+    }
+    // Income / دخل (Upwork etc)
+    else if (/upwork/i.test(merchantLower + ' ' + t)) {
+      ai.category = 'دخل';
+      ai.type = ai.type || 'مشتريات';
+    }
+    // Stationery / قرطاسية
+    else if (/maktabat|qurtas|library|مكتبة|قرطاسية/i.test(merchantLower + ' ' + t)) {
+      ai.category = 'قرطاسية';
+      ai.type = ai.type || 'مشتريات';
+    }
+    // Grocery / بقالة
+    else if (/zawyat|zawaya|raeah|azoom|alrwabi|grocery|بقالة/i.test(merchantLower + ' ' + t)) {
+      ai.category = 'بقالة';
+      ai.type = ai.type || 'مشتريات';
+    }
+
+    // ========== FALLBACK RULES ==========
+    
+    // تصنيف حسب العملة (مشتريات خارجية)
     if (currency && currency !== 'SAR' && (!ai.category || ai.category === 'أخرى')) {
       ai.category = 'مشتريات خارجية';
       ai.type = ai.type || 'مشتريات';
     }
 
-    // قواعد أساسية
-    if (/سداد|فاتورة|stc|كهرباء|مياه/i.test(t)) {
-      ai.category = ai.category || 'فواتير';
-      ai.type = ai.type || 'سداد';
-    } else if (/pos|mada|مدى|شراء|apple\s*pay|applepay|payment/i.test(t)) {
-      ai.category = ai.category || 'مشتريات عامة';
-      ai.type = ai.type || 'مشتريات';
+    // Transfer rules
+    if (/حوالة.*واردة|واردة.*محلية|داخلية واردة/i.test(t)) {
+      ai.category = ai.category || 'حوالات واردة';
+      ai.type = ai.type || 'حوالة';
+      ai.isIncoming = true;
+    } else if (/حوالة.*صادرة|صادرة.*محلية|داخلية صادرة/i.test(t)) {
+      ai.category = ai.category || 'حوالات صادرة';
+      ai.type = ai.type || 'حوالة';
+      ai.isIncoming = false;
     } else if (/تحويل|حوالة/i.test(t)) {
       ai.type = ai.type || 'حوالة';
-      if (/وارد|استلام|إيداع|راتب/i.test(t)) {
+      if (/وارد|استلام|إيداع/i.test(t)) {
         ai.category = ai.category || 'حوالات واردة';
         ai.isIncoming = true;
       } else if (/صادر|خصم|إلى/i.test(t)) {
@@ -171,6 +360,13 @@ function applySmartRules_(rawText, ai) {
         ai.isIncoming = false;
       }
     }
+
+    // Generic purchase rules
+    if (/pos|mada|مدى|شراء|apple\s*pay|applepay|payment|visa/i.test(t)) {
+      ai.category = ai.category || 'مشتريات عامة';
+      ai.type = ai.type || 'مشتريات';
+    }
+    
   } catch (e) { /* ignore */ }
 
   return ai;
