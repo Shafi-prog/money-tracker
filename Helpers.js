@@ -48,6 +48,11 @@ var APP_CONFIG = {
     MAX_LOGIN_ATTEMPTS: 5
   },
   
+  // Environment
+  ENV: {
+    SPREADSHEET_ID: '1-_yM5c7bt2ALoSnpDfO1yBhqqof8tyAZv5JlsYxUZ0A'
+  },
+
   // Logging
   LOG: {
     MAX_LOG_ROWS: 10000,
@@ -55,6 +60,18 @@ var APP_CONFIG = {
     ENABLE_DEBUG: false
   }
 };
+
+/**
+ * Get the active spreadsheet safely, supporting both bound and API execution
+ * @return {GoogleAppsScript.Spreadsheet.Spreadsheet}
+ */
+function getSpreadsheet() {
+  try {
+    return SpreadsheetApp.getActiveSpreadsheet() || SpreadsheetApp.openById(APP_CONFIG.ENV.SPREADSHEET_ID);
+  } catch (e) {
+    return SpreadsheetApp.openById(APP_CONFIG.ENV.SPREADSHEET_ID);
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 // LOGGING WITH LEVELS
@@ -291,6 +308,7 @@ function getCached_(key, fetchFunction, ttl) {
  */
 function invalidateCache_(keys) {
   var cache = CacheService.getScriptCache();
+  if (!Array.isArray(keys)) keys = [keys]; // Handle single key string
   keys.forEach(function(key) {
     cache.remove(key);
     log_(LOG_LEVEL.DEBUG, 'Cache', 'Invalidated: ' + key);

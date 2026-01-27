@@ -172,6 +172,17 @@
                 <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
               </label>
             </div>
+
+            <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+              <div>
+                <h3 class="font-medium">حفظ رموز التحقق</h3>
+                <p class="text-sm text-gray-600">تسجيل OTP كمعاملات</p>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" x-model="settings.save_temp_codes" class="sr-only peer">
+                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+              </label>
+            </div>
           </div>
         </div>
 
@@ -196,6 +207,73 @@
         </a>
       </div>
     </form>
+
+    <!-- Accounts Management Section -->
+    <div class="mt-8 bg-white rounded-xl shadow-lg p-6">
+      <div class="flex items-center justify-between mb-6">
+        <h2 class="text-2xl font-bold flex items-center gap-2">
+          <span>🏦</span>
+          <span>إدارة الحسابات</span>
+        </h2>
+        <button 
+          @click="showAddAccountModal = true"
+          class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2"
+        >
+          <span>➕</span>
+          <span>إضافة حساب</span>
+        </button>
+      </div>
+
+      <!-- Accounts Loading -->
+      <div x-show="accountsLoading" class="text-center py-8">
+        <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto"></div>
+        <p class="text-gray-500 mt-2">جاري تحميل الحسابات...</p>
+      </div>
+
+      <!-- Accounts List -->
+      <div x-show="!accountsLoading" class="overflow-x-auto">
+        <table class="w-full text-right" x-show="accounts.length > 0">
+          <thead>
+            <tr class="bg-gray-50 border-b">
+              <th class="p-3 text-sm font-semibold text-gray-600">اسم الحساب</th>
+              <th class="p-3 text-sm font-semibold text-gray-600">رقم الحساب</th>
+              <th class="p-3 text-sm font-semibold text-gray-600">البنك</th>
+              <th class="p-3 text-sm font-semibold text-gray-600">الرصيد</th>
+              <th class="p-3 text-sm font-semibold text-gray-600">آخر تحديث</th>
+              <th class="p-3 text-sm font-semibold text-gray-600">إجراءات</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="acc in accounts" :key="acc.row">
+              <tr class="border-b hover:bg-gray-50 transition">
+                <td class="p-3">
+                  <div class="flex items-center gap-2">
+                    <span x-text="acc.isMine ? '👤' : '🏢'"></span>
+                    <span x-text="acc.name" class="font-bold"></span>
+                  </div>
+                </td>
+                <td class="p-3 font-mono text-sm" x-text="acc.number || '-'"></td>
+                <td class="p-3" x-text="acc.bank || '-'"></td>
+                <td class="p-3 font-bold text-gray-800" dir="ltr" x-text="Number(acc.balance).toLocaleString()"></td>
+                <td class="p-3 text-sm text-gray-500" x-text="acc.lastUpdate || '-'"></td>
+                <td class="p-3">
+                  <div class="flex gap-2">
+                    <button @click="editAccount(acc)" class="text-blue-600 hover:text-blue-800" title="تعديل">✏️</button>
+                    <button @click="deleteAccount(acc)" class="text-red-600 hover:text-red-800" title="حذف">🗑️</button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+        
+        <!-- Empty State -->
+        <div x-show="accounts.length === 0" class="text-center py-8 text-gray-500">
+          <span class="text-4xl block mb-2">💳</span>
+          <p>لا توجد حسابات مسجلة.</p>
+        </div>
+      </div>
+    </div>
 
     <!-- Categories Management Section -->
     <div class="mt-8 bg-white rounded-xl shadow-lg p-6">
@@ -360,6 +438,85 @@
       </div>
     </div>
 
+    <!-- Add/Edit Account Modal -->
+    <div 
+      x-show="showAddAccountModal || showEditAccountModal" 
+      x-transition
+      class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      @click.self="closeModals()"
+    >
+      <div class="bg-white rounded-xl p-6 w-full max-w-md shadow-2xl">
+        <h3 class="text-xl font-bold mb-4" x-text="showEditAccountModal ? 'تعديل الحساب' : 'إضافة حساب جديد'"></h3>
+        
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">اسم الحساب *</label>
+            <input 
+              type="text" 
+              x-model="accountForm.name"
+              class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              placeholder="مثال: الراجحي، المحفظة"
+            >
+          </div>
+          
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">رقم الحساب (آخر 4)</label>
+              <input 
+                type="text" 
+                x-model="accountForm.number"
+                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                placeholder="1234"
+                maxlength="10"
+              >
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">البنك</label>
+              <input 
+                type="text" 
+                x-model="accountForm.bank"
+                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                placeholder="اسم البنك"
+              >
+            </div>
+          </div>
+          
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">الرصيد الحالي</label>
+            <input 
+              type="number" 
+              x-model="accountForm.balance"
+              step="0.01"
+              class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              placeholder="0.00"
+            >
+          </div>
+
+          <div class="flex items-center gap-3">
+            <input type="checkbox" x-model="accountForm.isMine" id="accMine" class="w-4 h-4">
+            <label for="accMine" class="text-sm text-gray-700">حساب شخصي (يظهر في تقاريري)</label>
+          </div>
+        </div>
+        
+        <div class="flex gap-3 mt-6">
+          <button 
+            @click="saveAccount()"
+            :disabled="!accountForm.name || formStates.isSavingAccount"
+            class="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <span x-show="!formStates.isSavingAccount" x-text="showEditAccountModal ? 'حفظ التعديلات' : 'إضافة الحساب'"></span>
+            <span x-show="formStates.isSavingAccount">⏳ جاري الحفظ...</span>
+          </button>
+          <button 
+            @click="closeModals()"
+            class="px-4 py-3 bg-gray-300 text-gray-700 rounded-lg font-bold hover:bg-gray-400"
+          >
+            إلغاء
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Quick Links -->
     <div class="mt-8 bg-white rounded-xl shadow-lg p-6">
       <h2 class="text-xl font-bold mb-4">🔗 روابط سريعة</h2>
@@ -467,7 +624,22 @@
           language: 'ar',
           salary_day: 1,
           enable_notifications: true,
-          auto_apply_rules: true
+          auto_apply_rules: true,
+          save_temp_codes: false
+        },
+
+        // Accounts management
+        accounts: [],
+        accountsLoading: false,
+        showAddAccountModal: false,
+        showEditAccountModal: false,
+        accountForm: {
+          row: null, 
+          name: '', 
+          number: '', 
+          bank: '',
+          balance: 0,
+          isMine: true
         },
 
         // Categories management
@@ -500,6 +672,7 @@
           isSubmitting: false,
           isLoading: false,
           isSavingCategory: false,
+          isSavingAccount: false,
           isCleaning: false,
           isResetting: false
         },
@@ -507,9 +680,133 @@
         init() {
           setTimeout(() => {
             this.loadSettings();
+            this.loadAccounts();
             this.loadCategories();
             this.loadResetOptions();
           }, 100);
+        },
+
+        loadAccounts() {
+          if (typeof google === 'undefined' || !google.script || !google.script.run) return;
+          
+          this.accountsLoading = true;
+          google.script.run
+            .withSuccessHandler((accs) => {
+              this.accountsLoading = false;
+              if (accs && Array.isArray(accs)) this.accounts = accs;
+            })
+            .withFailureHandler((err) => {
+              this.accountsLoading = false;
+              console.error('Accounts load error:', err);
+            })
+            .SOV1_UI_getAccounts();
+        },
+
+        editAccount(acc) {
+          this.accountForm = {
+            row: acc.id || acc.row,
+            name: acc.name,
+            number: acc.number || '',
+            bank: acc.bank || '',
+            balance: Number(acc.balance || 0),
+            isMine: acc.isMine !== false
+          };
+          this.showEditAccountModal = true;
+        },
+
+        deleteAccount(acc) {
+          if (!confirm('هل تريد حذف الحساب "' + acc.name + '"؟\nلن يتم حذف المعاملات السابقة المرتبطة به.')) return;
+          
+          google.script.run
+            .withSuccessHandler((result) => {
+              if (result && result.ok) {
+                this.notifications.success.show = true;
+                this.notifications.success.text = 'تم حذف الحساب بنجاح';
+                setTimeout(() => { this.notifications.success.show = false; }, 3000);
+                this.loadAccounts();
+              }
+            })
+            .withFailureHandler((err) => {
+              this.notifications.error.show = true;
+              this.notifications.error.text = 'خطأ: ' + err.message;
+            })
+            .SOV1_UI_deleteAccount(acc.id || acc.row);
+        },
+
+        saveAccount() {
+          if (!this.accountForm.name.trim()) {
+            alert('اسم الحساب مطلوب');
+            return;
+          }
+
+          this.formStates.isSavingAccount = true;
+
+          if (this.showEditAccountModal && this.accountForm.row) {
+            // Update
+            google.script.run
+              .withSuccessHandler((result) => {
+                this.formStates.isSavingAccount = false;
+                if (result && result.ok) {
+                  this.closeModals();
+                  this.notifications.success.show = true;
+                  this.notifications.success.text = 'تم تحديث الحساب';
+                  setTimeout(() => { this.notifications.success.show = false; }, 3000);
+                  this.loadAccounts();
+                }
+              })
+              .withFailureHandler((err) => {
+                this.formStates.isSavingAccount = false;
+                alert('خطأ: ' + err.message);
+              })
+              .SOV1_UI_updateAccount(this.accountForm.row, {
+                name: this.accountForm.name,
+                type: 'بنك',
+                number: this.accountForm.number,
+                bank: this.accountForm.bank,
+                balance: this.accountForm.balance,
+                isMine: this.accountForm.isMine,
+                isInternal: false,
+                aliases: '',
+                notes: ''
+              });
+          } else {
+            // Add
+            google.script.run
+              .withSuccessHandler((result) => {
+                this.formStates.isSavingAccount = false;
+                if (result && result.ok) {
+                  this.closeModals();
+                  this.notifications.success.show = true;
+                  this.notifications.success.text = 'تم إضافة الحساب';
+                  setTimeout(() => { this.notifications.success.show = false; }, 3000);
+                  this.loadAccounts();
+                }
+              })
+              .withFailureHandler((err) => {
+                this.formStates.isSavingAccount = false;
+                alert('خطأ: ' + err.message);
+              })
+              .SOV1_UI_addAccount({
+                name: this.accountForm.name,
+                type: 'بنك',
+                number: this.accountForm.number,
+                bank: this.accountForm.bank,
+                balance: this.accountForm.balance,
+                isMine: this.accountForm.isMine,
+                isInternal: false,
+                aliases: '',
+                notes: ''
+              });
+          }
+        },
+
+        closeModals() {
+          this.showAddCategoryModal = false;
+          this.showEditCategoryModal = false;
+          this.showAddAccountModal = false;
+          this.showEditAccountModal = false;
+          this.categoryForm = { row: null, name: '', icon: '📦', color: '#6B7280', active: true };
+          this.accountForm = { row: null, name: '', number: '', bank: '', balance: 0, isMine: true };
         },
 
         loadSettings() {

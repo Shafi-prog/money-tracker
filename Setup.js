@@ -1,125 +1,201 @@
 
-/********** Setup.gs — (كما عندك) + إضافة قائمة SOV1 **********
- * - لم نغيّر مسمياتك القديمة (V120) لأنك تجاهلت تغيير المسمى.
- * - أضفنا SubMenu جديد في النهاية لميزات/اختبارات SOV1.
- * مرجع هيكل قائمتك الأصلية من ملفك المرفق. [1](https://www.webhook.it/guides/webhook-testing-best-practices)
- ***************************************************************/
+/********** Setup.gs — Money Tracker Admin System **********/
+// REPLACES V120 Legacy Setup
 
 function onOpen(e) {
   try {
     var ui = SpreadsheetApp.getUi();
+    
+    ui.createMenu('MoneyTracker Admin')
+      .addItem('🚀 Run Master Verification', 'RUN_MASTER_VERIFICATION')
+      .addItem('🧪 Run Automated Checklist', 'RUN_AUTOMATED_CHECKLIST')
+.addSeparator()
+      .addSubMenu(ui.createMenu('🛠️ Maintenance')
+          .addItem('🧹 Clean Unused Sheets', 'CLEAN_SYSTEM_SHEETS')
+          .addItem('⚠️ Reset Transaction Data (Keep Config)', 'RESET_SYSTEM_DATA_KEEP_CONFIG')
+          .addItem('📋 Clean Test Categories', 'CLEAN_CATEGORIES_SHEET')
+      )
+      .addSubMenu(ui.createMenu('⚙️ Configuration')
+          .addItem('📥 Initial System Setup', 'initialsystem')
+          .addItem('🤖 Set Bot Commands', 'SETUP_BOT_COMMANDS')
+          .addItem('☁️ Seed Classifier (AR)', 'seedClassifierMap_AR')
+      )
+      .addSeparator()
+      .addItem('🔄 Rebuild Dashboard & Links', 'REBUILD_LINKS_FROM_SHEET1_')
+      .addToUi();
 
-    // ===== القائمة الرئيسية (كما عندك) =====
-    var menu = ui.createMenu('V120');
-
-    // 1) تشغيل سريع (LIGHT) — افتراضي
-    menu.addItem('✅ تشغيل سريع (LIGHT) — افتراضي', 'V120_MasterRun_LIGHT');
-
-    // 2) أهم العمليات اليومية
-    menu.addSeparator();
-    menu.addSubMenu(
-      ui.createMenu('🧩 تشغيل يومي')
-        .addItem('🧱 تهيئة أولية (Initial)', 'initialsystem')
-        .addItem('🧪 زرع الصيغ (Seed Formulas)', 'test_10_seed_formulas')
-        .addItem('🌐 Seed Classifier (AR)', 'seedClassifierMap_AR')
-        .addSeparator()
-        .addItem('🧮 إعادة احتساب الميزانية (من Sheet1)', 'test_05_recompute_budgets_from_sheet1')
-        .addItem('📊 إعادة بناء Dashboard (محسّن)', 'rebuildDashboard')
-        .addSeparator()
-        .addItem('📊 إرسال Snapshot (Budgets)', 'test_08_send_snapshot')
-    );
-
-    // 3) اختبارات وتشخيص
-    menu.addSubMenu(
-      ui.createMenu('🧪 اختبارات وتشخيص')
-        .addItem('🌐 Probe Webhook (GET/POST)', 'test_01_probeWebhook')
-        .addItem('🤖 AI Diagnostics', 'test_AI_Diagnostics')
-        .addSeparator()
-        .addItem('🧪 اختبار شامل موحّد (RUN_COMPREHENSIVE_TEST)', 'RUN_COMPREHENSIVE_TEST')
-    );
-
-    // 4) صيانة/إدارة
-    menu.addSubMenu(
-      ui.createMenu('🛠️ صيانة وإدارة')
-        .addItem('🔒 تفعيل وضع الصيانة (ON)', 'V120_Maintenance_ON')
-        .addItem('🔓 إلغاء وضع الصيانة (OFF)', 'V120_Maintenance_OFF')
-        .addSeparator()
-        .addItem('🧹 Reset Ledgers (Debt/Budgets/Dashboard)', 'resetLedgers_KeepHeaders')
-        .addSeparator()
-        .addItem('🧽 TestReset (LIGHT) — يحافظ على Sheet1', 'V120_TestReset_LIGHT_KeepSheet1')
-        .addItem('🧽 TestReset (FULL) — يمسح Sheet1', 'V120_TestReset_FULL_WipeSheet1')
-        .addSeparator()
-        .addItem('🔁 تعيين/إصلاح Webhook (DIRECT)', 'setWebhook_DIRECT_no302')
-        .addItem('⛔ إيقاف Webhook تيليجرام + تصفير Pending', 'V120_StopTelegramWebhook_NOW')
-    );
-
-    // 5) متقدم
-    menu.addSeparator();
-    menu.addSubMenu(
-      ui.createMenu('⚡ متقدم')
-        .addItem('🧪 تشغيل شامل (FULL) — يمسح Sheet1', 'V120_MasterRun_FULL')
-        .addSeparator()
-        .addItem('✅ فحص البيئة (Healthcheck)', 'test_00_healthcheck')
-    );
-
-    // =========================================================
-    // ✅ قائمة إضافية: اختبارات وتحسينات النظام (SOV1)
-    // (بدون تغيير مسمياتك الأساسية)
-    // =========================================================
-    menu.addSeparator();
-    menu.addSubMenu(
-      ui.createMenu('🟦 اختبارات وتحسينات النظام')
-        .addItem('✅ تشغيل جميع الاختبارات (RUN_ALL_TESTS)', 'RUN_ALL_TESTS')
-        .addSeparator()
-        .addItem('🏷️ إعداد ورقة التصنيفات', 'SOV1_SETUP_CATEGORIES_SHEET_')
-        .addItem('🧹 تنظيف التصنيفات التجريبية', 'SOV1_CLEAN_TEST_CATEGORIES_')
-        .addSeparator()
-        .addItem(' تدقيق وربط البيانات (RUN_FULL_AUDIT_)', 'RUN_FULL_AUDIT_')
-        .addItem('🔄 ترحيل Sheet1 للمخطط الجديد', 'MIGRATE_SHEET1_SCHEMA_')
-        .addItem('🧩 إعادة بناء الروابط (Sheet1 → Budgets/Dashboard)', 'REBUILD_LINKS_FROM_SHEET1_')
-        .addSeparator()
-        .addItem('📨 اختبار رسالة Telegram', 'TEST_TELEGRAM_MESSAGE_')
-        .addSeparator()
-        .addItem('🚀 تشغيل جميع المراحل دفعة واحدة', 'RUN_ALL_PHASES_')
-        .addSeparator()
-        .addItem('⚙️ إعداد Trigger للـ Queue (كل دقيقة)', 'SOV1_setupQueueTrigger_')
-        .addItem('⛔ إيقاف Trigger للـ Queue', 'SOV1_deleteQueueTrigger_')
-        .addItem('▶️ تشغيل Worker مرة واحدة (Queue)', 'SOV1_processQueueBatch_')
-        .addSeparator()
-        .addItem('🤖 تعيين أوامر البوت (setMyCommands)', 'SOV1_setMyCommands_')
-        .addItem('📋 عرض أوامر البوت (getMyCommands)', 'SOV1_getMyCommands_')
-    );
-
-    menu.addToUi();
-
+    // Auto-schedule the automated checklist the first time a user opens the sheet
+    try {
+      var props = PropertiesService.getScriptProperties();
+      var scheduled = props.getProperty('AUTOTEST_SCHEDULED');
+      if (!scheduled) {
+        // Schedule a one-time time-based trigger to run in ~1 minute
+        ScriptApp.newTrigger('RUN_AUTOMATED_CHECKLIST').timeBased().after(60 * 1000).create();
+        props.setProperty('AUTOTEST_SCHEDULED', String(new Date().getTime()));
+        SpreadsheetApp.getActiveSpreadsheet().toast('Automated checklist scheduled to run in one minute (first open).', 'Automated Checklist');
+      }
+    } catch (err) {
+      Logger.log('Auto-schedule check failed: ' + err.message);
+    }
   } catch (err) {
     console.log('onOpen error: ' + err);
   }
 }
 
+/**
+ * ⚠️ CORE DATA RESET
+ * Wipes Transactions, Debt, and Dashboard history.
+ * Preserves: Accounts, Categories, Classifier_Map.
+ */
+function RESET_SYSTEM_DATA_KEEP_CONFIG() {
+  var ui = SpreadsheetApp.getUi();
+  var result = ui.alert(
+    '⚠️ WARNING: ERASE DATA?',
+    'This will delete ALL transactions, debt records, and reset budget spending.\n\n' +
+    'Target: Transactions (Sheet1), Debt_Ledger, Dashboard, Spending Counts.\n\n' +
+    'PRESERVED: Accounts, Categories, Classifier Settings.\n\n' +
+    'Are you sure?',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (result == ui.Button.YES) {
+    _wipeDataKeepHeaders_();
+    ui.alert('✅ System Data Reset Complete.\n\nReady for fresh use.');
+  }
+}
+
+function _wipeDataKeepHeaders_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // 1. Sheet1 (Transactions)
+  var s1 = ss.getSheetByName('Sheet1');
+  if (s1 && s1.getLastRow() > 1) {
+    s1.getRange(2, 1, s1.getLastRow() - 1, s1.getLastColumn()).clearContent();
+  }
+  
+  // 2. Debt_Ledger
+  var sD = ss.getSheetByName('Debt_Ledger');
+  if (sD && sD.getLastRow() > 1) {
+    sD.getRange(2, 1, sD.getLastRow() - 1, sD.getLastColumn()).clearContent();
+  }
+
+  // 3. Budgets (Reset Spent/Remaining/Links)
+  // Structure: Category, Budget, Spent, Remaining, LinkedUUIDs
+  var sB = ss.getSheetByName('Budgets');
+  if (sB && sB.getLastRow() > 1) {
+     var lastRow = sB.getLastRow();
+     // Reset 'Spent' (Col 3) to 0
+     sB.getRange(2, 3, lastRow - 1, 1).setValue(0);
+     // Clear 'LinkedUUIDs' (Col 5)
+     if (sB.getLastColumn() >= 5) {
+        sB.getRange(2, 5, lastRow - 1, 1).clearContent();
+     }
+  }
+  
+  // 4. Dashboard
+  var sDash = ss.getSheetByName('Dashboard');
+  if (sDash && sDash.getLastRow() > 1) {
+     sDash.getRange(2, 1, sDash.getLastRow() - 1, sDash.getLastColumn()).clearContent();
+  }
+  
+  // 5. Ingress_Debug
+  var sDeb = ss.getSheetByName('Ingress_Debug');
+  if (sDeb && sDeb.getLastRow() > 1) {
+    sDeb.getRange(2, 1, sDeb.getLastRow() - 1, sDeb.getLastColumn()).clearContent();
+  }
+  
+  // 6. Queue
+  var sQ = ss.getSheetByName('Queue');
+  if (sQ && sQ.getLastRow() > 1) {
+    sQ.getRange(2, 1, sQ.getLastRow() - 1, sQ.getLastColumn()).clearContent();
+  }
+}
+
 /** غلاف للتوافق (كما في مشروعك) */
 function initialsystem() {
-  if (typeof V120_runInitial_ === 'function') return V120_runInitial_();
   if (typeof ENSURE_ALL_SHEETS === 'function') return ENSURE_ALL_SHEETS();
   throw new Error('ENSURE_ALL_SHEETS غير موجودة');
 }
 
 /**
  * ✅ تفعيل أوامر البوت من مكان واضح
- * 📍 الملف: Setup.gs
  */
 function SETUP_BOT_COMMANDS() {
+  // Try finding it in TelegramActions or TelegramCommands
   if (typeof SOV1_setMyCommands_ === 'function') return SOV1_setMyCommands_();
-  throw new Error('SOV1_setMyCommands_ غير موجودة في Telegram_Commands.gs');
+  // Fallback if defined elsewhere
+  if (typeof setMyCommands === 'function') return setMyCommands();
+  Logger.log('Warning: setMyCommands function not found.');
+}
+
+/**
+ * 🧹 تنظيف التصنيفات التجريبية
+ * يحذف أي تصنيف يحتوي على "اختبار" أو "test"
+ */
+function CLEAN_CATEGORIES_SHEET() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName('Categories');
+  if (!sh) return { success: false, message: 'Categories sheet not found' };
+  
+  var data = sh.getDataRange().getValues();
+  var rowsDeleted = 0;
+  
+  // Loop backwards to safely delete rows
+  for (var i = data.length - 1; i >= 1; i--) {
+    var name = String(data[i][0] || '').toLowerCase();
+    if (name.indexOf('اختبار') !== -1 || name.indexOf('test') !== -1) {
+      sh.deleteRow(i + 1);
+      rowsDeleted++;
+    }
+  }
+  
+  return { success: true, count: rowsDeleted };
+}
+
+/**
+ * 🧹 CLEAN_SYSTEM_SHEETS
+ * Deletes unnecessary or test sheets that clutter the backend.
+ * Keeps only: Sheet1, Accounts, Budgets, Debt_Ledger, Dashboard, Categories, Classifier_Map, Queue, Ingress_Debug, Transfers_Tracking
+ */
+function CLEAN_SYSTEM_SHEETS() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var allSheets = ss.getSheets();
+  var keep = ['Sheet1', 'Accounts', 'Budgets', 'Debt_Ledger', 'Dashboard', 'Categories', 'Classifier_Map', 'Queue', 'Ingress_Debug', 'Transfers_Tracking'];
+  
+  var deleted = [];
+  
+  allSheets.forEach(function(sheet) {
+    var name = sheet.getName();
+    // Delete if not in keep list OR if it starts with 'test_' or 'Copy'
+    // BUT be careful not to delete 'Form Responses' if user has one, though script relies on Webhook.
+    // Enhanced safety: Only delete if it explicitly looks like junk
+    var isJunk = (name.toLowerCase().indexOf('test') === 0) || 
+                 (name.indexOf('Copy of') === 0) ||
+                 (name.indexOf('Sheet1_legacy') === 0) || 
+                 (name.indexOf('Backup_') === 0);
+                 
+    // Also delete if it's a default 'Sheet1' but we are using 'Sheet1' (conflict?) 
+    // No, we keep Sheet1.
+    
+    if (isJunk && keep.indexOf(name) === -1) {
+      try {
+        ss.deleteSheet(sheet);
+        deleted.push(name);
+      } catch (e) {
+        Logger.log('Could not delete sheet ' + name + ': ' + e.message);
+      }
+    }
+  });
+  
+  return { success: true, deleted: deleted };
 }
 
 /**
  * ✅ ENSURE_ALL_SHEETS
  * إنشاء جميع الأوراق المطلوبة بالهيدرات الصحيحة والربط بينها
- * 📍 الملف: Setup.gs
  */
 function ENSURE_ALL_SHEETS() {
-  var ss = _ss();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheetsCreated = [];
   var sheetsExisted = [];
   var schema = (typeof SCHEMA !== 'undefined') ? SCHEMA : null;
@@ -173,13 +249,22 @@ function ENSURE_ALL_SHEETS() {
   ensureSheet_('Classifier_Map', ['Key','Category','Type','IsIncoming','AccNum','CardNum']);
 
   // ===== 6) Accounts =====
-  ensureSheet_('Accounts', ['Account','Bank','Type','Owner','Notes']);
+  if (typeof ensureAccountsSheet_ === 'function') {
+    // Use the unified 10-column Accounts schema from Accounts.js
+    ensureAccountsSheet_();
+  } else {
+    // Fallback: create Accounts with the modern schema expected by DataLinkage
+    ensureSheet_('Accounts', ['الاسم','النوع','الرقم','البنك','الرصيد','آخر_تحديث','حسابي','تحويل_داخلي','أسماء_بديلة','ملاحظات']);
+  }
 
   // ===== 7) Queue =====
   ensureSheet_('Queue', ['ID','Source','Text','Meta','Status','Date']);
 
   // ===== 8) Ingress_Debug =====
   ensureSheet_('Ingress_Debug', ['Time','Level','Path','Meta','Text']);
+  
+  // ===== 9) Transfers_Tracking =====
+  ensureSheet_('Transfers_Tracking', ['UUID','Date','FromAccount','ToAccount','Amount','RelatedUUIDs']);
 
   var result = {
     created: sheetsCreated,
@@ -220,7 +305,7 @@ function _ensureColumn_(sheet, header, colIndex) {
  * ترحيل Sheet1 إلى مخطط UUID (في حال عدم التطابق)
  */
 function MIGRATE_SHEET1_SCHEMA_() {
-  var ss = _ss();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName('Sheet1');
   if (!sheet) return { ok: false, error: 'Sheet1 غير موجود' };
 
@@ -331,7 +416,7 @@ function MIGRATE_SHEET1_SCHEMA_() {
  * إعادة بناء الروابط بين Sheet1 و Budgets و Dashboard
  */
 function REBUILD_LINKS_FROM_SHEET1_() {
-  var ss = _ss();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
   var s1 = ss.getSheetByName('Sheet1');
   var sB = ss.getSheetByName('Budgets');
   var sDash = ss.getSheetByName('Dashboard');
@@ -453,4 +538,47 @@ function processMessage(text, source, chatId) {
   }
   
   throw new Error('processTransaction غير موجودة في Flow.gs');
+}
+
+/**
+ * ✅ SEED CLASSIFIER (AR)
+ * Add basic Arabic Merchants if missing
+ */
+function seedClassifierMap_AR() {
+    var sMap = _sheet('Classifier_Map');
+    if (!sMap) return;
+    
+    var data = sMap.getDataRange().getValues();
+    var keys = {};
+    for (var i = 1; i < data.length; i++) {
+        keys[String(data[i][0]).toLowerCase()] = true;
+    }
+    
+    var newEntries = [
+        ['مطعم', 'طعام', '', ''],
+        ['كنتاكي', 'طعام', '', ''],
+        ['ماكدونالدز', 'طعام', '', ''],
+        ['سوبرماركت', 'بقالة', '', ''],
+        ['أسواق', 'بقالة', '', ''],
+        ['محطة', 'نقل', '', ''],
+        ['وقود', 'نقل', '', ''],
+        ['صيدلية', 'صحة', '', ''],
+        ['stc', 'فواتير', '', ''],
+        ['mobily', 'فواتير', '', '']
+    ];
+    
+    newEntries.forEach(function(row) {
+        if (!keys[row[0]]) {
+            sMap.appendRow([row[0], row[1], row[2], row[3], '', '']);
+        }
+    });
+
+    return "Seeded " + newEntries.length + " entries.";
+}
+
+function _sheet(name) { 
+  if (typeof getSpreadsheet === 'function') {
+    return getSpreadsheet().getSheetByName(name);
+  }
+  return SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name); 
 }

@@ -46,7 +46,11 @@ function sendTelegramLogged_(chatId, text, extra) {
   var body = resp.getContentText();
 
   if (code !== 200) {
-    try { logIngressEvent_('ERROR', 'sendMessage', { code: code }, body); } catch (e) {}
+    try {
+      // Log chat_id and a short preview of the message for diagnostics
+      var preview = String(payload.text || '').slice(0, 300);
+      logIngressEvent_('ERROR', 'sendMessage', { code: code, chatId: payload.chat_id, preview: preview }, body);
+    } catch (e) {}
   }
 
   return { ok: (code === 200), code: code, body: body };
@@ -124,6 +128,28 @@ function sendBudgetsSnapshotToTelegram_() {
 
   cache.put('BUDGET_SNAP', msg, 15);
   sendTelegram_(hub, msg);
+}
+
+/** ===== تقرير أرصدة الحسابات ===== */
+function sendAccountsBalanceReport_(chatId) {
+  var hub = String(chatId || getHubChatId_());
+  if (!hub) return;
+  
+  if (typeof getAllBalancesHTML_ === 'function') {
+    var html = getAllBalancesHTML_();
+    if (!html) {
+      sendTelegram_(hub, '⚠️ لا توجد أرصدة مسجلة بعد.');
+    } else {
+      var msg = 
+        '💰 <b>رصد مالي - أرصدة الحسابات</b>\n' + 
+        html + '\n\n' + 
+        '📝 <i>ملاحظة: الأرصدة تقديرية بناءً على العمليات المسجلة</i>';
+      sendTelegram_(hub, msg);
+    }
+  } else {
+    // Fallback if Balances.js not loaded or function missing
+    sendTelegram_(hub, '⚠️ وظيفة الأرصدة غير متاحة حالياً (Missing Logic).');
+  }
 }
 
 /** ===== آخر N ===== */
@@ -257,6 +283,16 @@ function getMonthlySpendFor_(merchantOrCategory, type) {
 function sendTransactionReport(ai, sync, src, raw, destChatId) {
   var hub = String(destChatId || getHubChatId_() || '');
   if (!hub) return;
+
+  // Respect notification settings if notification system is present
+  try {
+    if (typeof areTelegramNotificationsEnabled === 'function' && !areTelegramNotificationsEnabled()) {
+      Logger.log('Telegram transaction report skipped - notifications disabled by settings');
+      return;
+    }
+  } catch (e) {
+    Logger.log('Notification settings check failed, sending anyway: ' + e);
+  }
 
   var amount = Number(ai && ai.amount ? ai.amount : 0);
   var merchant = (ai && ai.merchant) ? String(ai.merchant) : 'غير محدد';
@@ -486,46 +522,25 @@ function sendLastNTransactions_(chatId, n) {
 }
 
 /** ===== إرسال أرصدة جميع الحسابات ===== */
-// Updated via Copilot
 function sendAllBalancesToTelegram_(chatId) {
+  // Reuse the function we added previously
+  if (typeof sendAccountsBalanceReport_ === 'function') {
+    return sendAccountsBalanceReport_(chatId);
+  }
+
+  // Fallback implementation if specific function is missing
   chatId = String(chatId || getHubChatId_());
   if (!chatId) return;
-  
-  if (typeof ensureBalancesSheet_ !== 'function') {
-    sendTelegram_(chatId, '⚠️ وظيفة الأرصدة غير متاحة.');
-    return;
-  }
-  
-  var sh = ensureBalancesSheet_();
-  var data = sh.getDataRange().getValues();
-  
-  if (data.length < 2) {
-    sendTelegram_(chatId, '📊 لا توجد أرصدة مسجلة بعد.\n\nسيتم تسجيل الأرصدة تلقائياً عند معالجة العمليات.');
-    return;
-  }
-  
-  var html = '<b>💳 الأرصدة الحالية (تقديرية)</b>\n━━━━━━━━━━━━━━\n\n';
-  var total = 0;
-  
-  for (var i = 1; i < data.length; i++) {
-    var accountName = String(data[i][0] || '');
-    var balance = Number(data[i][4] || 0);
-    var lastUpdate = data[i][5];
-    total += balance;
-    
-    var emoji = balance >= 0 ? '💚' : '🔴';
-    var dateStr = '';
-    if (lastUpdate instanceof Date) {
-      dateStr = ' <i>(' + Utilities.formatDate(lastUpdate, Session.getScriptTimeZone(), 'MM/dd HH:mm') + ')</i>';
+
+  if (typeof getAllBalancesHTML_ === 'function') {
+    var html = getAllBalancesHTML_();
+    if (html) {
+      sendTelegram_(chatId, '<b>💳 الأرصدة الحالية (تقديرية)</b>\n' + html);
+      return;
     }
-    
-    html += emoji + ' <b>' + escHtml_(accountName) + ':</b> ' + balance.toFixed(2) + ' SAR' + dateStr + '\n';
   }
-  
-  html += '\n━━━━━━━━━━━━━━\n';
-  html += '<b>💰 الإجمالي:</b> ' + total.toFixed(2) + ' SAR';
-  
-  sendTelegramLogged_(chatId, html, { parse_mode: 'HTML' });
+
+  sendTelegram_(chatId, '⚠️ تعذر جلب الأرصدة.');
 }
 
 // Backward compatibility alias

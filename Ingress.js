@@ -65,7 +65,15 @@ function doPost(e) {
       return json_(400, { ok: false, error: "رسالة فارغة" });
     }
 
-    var text = String(req.body).trim();
+    // ✅ تنظيف الرسائل المحولة (إذا كانت forward)
+    var text = parseForwardedMessage_(String(req.body).trim());
+
+    // ✅ اكتشاف البنك من المرسل (إثراء)
+    var bankDetection = detectBankFromSender_(req.from);
+    if (bankDetection.confidence === 'high') {
+       // Append bank name to source for better tracking
+       source += ' | ' + bankDetection.id;
+    }
 
     // تجاهل OTP / Declined / Hold
     if (shouldIgnoreMessage_(text)) {
@@ -306,16 +314,23 @@ function normalizeDate_(value) {
 function shouldIgnoreMessage_(text) {
   var t = normalizeText_(text);
 
+  // Check if user wants to save OTPs
+  var saveTempCodes = PropertiesService.getScriptProperties().getProperty('SAVE_TEMP_CODES') === 'true';
+
   // 1) OTP / تحقق
   var otpPatterns = [
     /otp\b/i,
     /one\s*time\s*password/i,
-    /رمز\s*(التحقق|التفعيل|الدخول|الأمان|السري)/,
+    /رمز\s*(التحقق|التفعيل|الدخول|الأمان|السري|مؤقت)/,
     /كود\s*(التحقق|التفعيل)/,
     /كلمة\s*مرور\s*لمرة\s*واحدة/,
     /لا\s*تشارك\s*(هذا\s*)?الرمز/,
     /\bpasscode\b/i
   ];
+
+  // If user wants to save OTPs, we DO NOT return true here
+  // Instead, we let it pass. The Classifier should label it as 'تحقق' or similar.
+  if (!saveTempCodes && matchesAny_(t, otpPatterns)) return true;
 
   // 2) رفض/تعليق/قيد الانتظار/عكس
   var declineHoldPatterns = [
@@ -325,6 +340,9 @@ function shouldIgnoreMessage_(text) {
     /تم\s*رفض/,
     /تعذر\s*إتمام/,
     /لم\s*تتم\s*(العملية|المعاملة)/,
+    /رصيد\s*غير\s*كاف/,
+    /insufficient\s*(fund|balance)/i,
+    /not\s*enough\s*balance/i,
     /\bhold\b/i,
     /معلّق/,
     /تعليق/,
@@ -347,7 +365,7 @@ function shouldIgnoreMessage_(text) {
     /تنبيه\s*أمني/
   ];
 
-  if (matchesAny_(t, otpPatterns)) return true;
+  // REMOVED duplicate check for otpPatterns here
   if (matchesAny_(t, declineHoldPatterns)) return true;
   if (matchesAny_(t, nonFinancialPatterns)) return true;
 
@@ -473,6 +491,9 @@ function handleTelegramWebhook_(update) {
     }
     
     text = text.trim();
+
+    // Log incoming telegram text for traceability (short preview)
+    try { logIngressEvent_('INFO', 'tg_received', { chatId: chatId, preview: String(text || '').slice(0,160) }, 'telegram'); } catch (e) {}
 
     // Dedup نصوص Telegram لتفادي التكرار عند إعادة الإرسال
     if (isDuplicateTelegramText_(chatId, text)) {
@@ -753,4 +774,58 @@ function _test_shouldIgnoreMessage() {
   samples.forEach(function (s) {
     Logger.log("%s => ignore=%s", s, shouldIgnoreMessage_(s));
   });
+}
+
+/**
+ * ✅ تنظيف الرسائل المحولة (Forwarded)
+ * يستخرج نص الرسالة الأصلي من رسالة محولة
+ */
+function parseForwardedMessage_(text) {
+  var t = String(text || '').trim();
+
+  // أنماط الرسائل المحولة
+  // 1. Forwarded message header
+  // Forwarded from STC (12:30 PM):
+  // Forwarded message:
+  // From: Name
+  
+  // إزالة Header "Forwarded message"
+  t = t.replace(/^Forwarded message:?\s*/i, '');
+  
+  // إزالة سطر "From: ..."
+  t = t.replace(/^From:.*(\r\n|\n|\r)/mi, '');
+  
+  // إزالة "Forwarded from X:"
+  t = t.replace(/^Forwarded from.*:?\s*/mi, '');
+
+  // إزالة توقيتات في البداية مثل [12:30 PM] أو 12:30:
+  t = t.replace(/^\[?\d{1,2}:\d{2}\s*(?:AM|PM)?\]?:?\s*/i, '');
+
+  return t.trim();
+}
+
+/**
+ * ✅ التعرف على البنك من اسم المرسل (Sender ID)
+ * يعتمد على قائمة البنوك السعودية المعروفة
+ */
+function detectBankFromSender_(sender) {
+  var s = String(sender || '').toLowerCase().trim();
+  if (!s) return { id: 'unknown', confidence: 'none' };
+  
+  // قائمة البنوك (Sender IDs الشائعة)
+  if (s.indexOf('alrajhi') !== -1 || s.indexOf('الراجحي') !== -1) return { id: 'AlRajhi', confidence: 'high' };
+  if (s.indexOf('ncb') !== -1 || s.indexOf('alahli') !== -1 || s.indexOf('snb') !== -1 || s.indexOf('الأهلي') !== -1) return { id: 'SNB', confidence: 'high' }; 
+  if (s.indexOf('alinma') !== -1 || s.indexOf('الإنماء') !== -1) return { id: 'Alinma', confidence: 'high' };
+  if (s.indexOf('riyad') !== -1 || s.indexOf('الرياض') !== -1) return { id: 'Riyad', confidence: 'high' };
+  if (s.indexOf('stcpay') !== -1 || s.indexOf('stc pay') !== -1) return { id: 'STCPay', confidence: 'high' };
+  if (s.indexOf('urpay') !== -1 || s.indexOf('ur pay') !== -1) return { id: 'UrPay', confidence: 'high' };
+  if (s.indexOf('albilad') !== -1 || s.indexOf('البلاد') !== -1) return { id: 'AlBilad', confidence: 'high' };
+  if (s.indexOf('anb') !== -1 || s.indexOf('العربي') !== -1) return { id: 'ANB', confidence: 'high' };
+  if (s.indexOf('sabb') !== -1 || s.indexOf('sab') !== -1 || s.indexOf('الأول') !== -1) return { id: 'SAB', confidence: 'high' };
+  if (s.indexOf('jazira') !== -1 || s.indexOf('الجزيرة') !== -1) return { id: 'AlJazira', confidence: 'high' };
+  if (s.indexOf('sajib') !== -1 || s.indexOf('investment') !== -1 || s.indexOf('الاستثمار') !== -1 || s.indexOf('saib') !== -1 || s.indexOf('8001') !== -1) return { id: 'SAIB', confidence: 'high' };
+  if (s.indexOf('fransi') !== -1 || s.indexOf('bsf') !== -1 || s.indexOf('الفرنسي') !== -1) return { id: 'BSF', confidence: 'high' };
+  if (s.indexOf('tiqmo') !== -1) return { id: 'Tiqmo', confidence: 'high' };
+  
+  return { id: 'unknown', confidence: 'low', original: s };
 }

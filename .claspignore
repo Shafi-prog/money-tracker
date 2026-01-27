@@ -11,8 +11,10 @@ _archived/**
 **/_archived/**
 
 # Ignore test files (not deployed to GAS)
-_tests/**
-**/_tests/**
+# NOTE: For automated setup/testing we temporarily allow `_tests` to be deployed.
+# Remove or revert this change when done.
+!_tests/**
+!**/_tests/**
 
 # Ignore src folder (reference only - duplicates root files)
 src/**

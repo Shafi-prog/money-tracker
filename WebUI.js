@@ -21,6 +21,29 @@ function SOV1_UI_doGet_(e) {
          result = (typeof DEBUG_TELEGRAM_STATUS === 'function') ? JSON.stringify(DEBUG_TELEGRAM_STATUS()) : "Function DEBUG_TELEGRAM_STATUS not found.";
       } else if (cmd === 'RUN_MASTER_TESTS') {
          result = (typeof RUN_MASTER_TESTS === 'function') ? JSON.stringify(RUN_MASTER_TESTS()) : "Function RUN_MASTER_TESTS not found.";
+      } else if (cmd === 'RUN_AUTOMATED_CHECKLIST') {
+         result = (typeof RUN_AUTOMATED_CHECKLIST === 'function') ? JSON.stringify(RUN_AUTOMATED_CHECKLIST()) : "Function RUN_AUTOMATED_CHECKLIST not found.";
+      } else if (cmd === 'ENSURE_ALL_SHEETS') {
+         result = (typeof ENSURE_ALL_SHEETS === 'function') ? JSON.stringify(ENSURE_ALL_SHEETS()) : "Function ENSURE_ALL_SHEETS not found.";
+      } else if (cmd === 'CLEAN_CATEGORIES_SHEET') {
+         result = (typeof CLEAN_CATEGORIES_SHEET === 'function') ? JSON.stringify(CLEAN_CATEGORIES_SHEET()) : "Function CLEAN_CATEGORIES_SHEET not found.";
+      } else if (cmd === 'SETUP_BOT_COMMANDS') {
+         result = (typeof SETUP_BOT_COMMANDS === 'function') ? JSON.stringify(SETUP_BOT_COMMANDS()) : "Function SETUP_BOT_COMMANDS not found.";
+      } else if (cmd === 'CLEAN_SYSTEM_SHEETS') {
+         result = (typeof CLEAN_SYSTEM_SHEETS === 'function') ? JSON.stringify(CLEAN_SYSTEM_SHEETS()) : "Function CLEAN_SYSTEM_SHEETS not found.";
+      } else if (cmd === 'RUN_MASTER_VERIFICATION') {
+         result = (typeof RUN_MASTER_VERIFICATION === 'function') ? JSON.stringify(RUN_MASTER_VERIFICATION()) : "Function RUN_MASTER_VERIFICATION not found.";
+      } else if (cmd === 'RUN_COMPLETE_SYSTEM_TEST') {
+         if (typeof RUN_COMPLETE_SYSTEM_TEST === 'function') {
+           try {
+             var r = RUN_COMPLETE_SYSTEM_TEST();
+             result = (typeof r === 'undefined') ? "Started RUN_COMPLETE_SYSTEM_TEST (check Executions/Logs in Apps Script)" : JSON.stringify(r);
+           } catch (ex) {
+             result = "Error executing RUN_COMPLETE_SYSTEM_TEST: " + ex.message;
+           }
+         } else {
+           result = "Function RUN_COMPLETE_SYSTEM_TEST not found.";
+         }
       } else if (cmd === 'SETUP_TELEGRAM_WEBHOOK') {
          var newUrl = e.parameter.url;
          if (newUrl) {
@@ -43,6 +66,63 @@ function SOV1_UI_doGet_(e) {
          } else {
            result = "Function SOV1_setupQueueTrigger_ not found.";
          }
+      } else if (cmd === 'TEST_ADD_TX') {
+         try {
+           var text = e.parameter.text ? decodeURIComponent(e.parameter.text) : 'أضف: 10 | CLI Test | طعام';
+           if (typeof SOV1_UI_addManualTransaction_ === 'function') {
+             var r = SOV1_UI_addManualTransaction_(text);
+             result = JSON.stringify({ success: true, result: r });
+           } else {
+             result = 'Function SOV1_UI_addManualTransaction_ not found.';
+           }
+         } catch (ex) {
+           result = 'Error executing TEST_ADD_TX: ' + ex.message;
+         }
+      } else if (cmd === 'RUN_MANUAL_SETUP') {
+         try {
+           var summary = {};
+           summary.ENSURE_ALL_SHEETS = (typeof ENSURE_ALL_SHEETS === 'function') ? ENSURE_ALL_SHEETS() : 'Function not found';
+           summary.CLEAN_CATEGORIES_SHEET = (typeof CLEAN_CATEGORIES_SHEET === 'function') ? CLEAN_CATEGORIES_SHEET() : 'Function not found';
+           summary.SETUP_BOT_COMMANDS = (typeof SETUP_BOT_COMMANDS === 'function') ? SETUP_BOT_COMMANDS() : 'Function not found';
+           summary.CLEAN_SYSTEM_SHEETS = (typeof CLEAN_SYSTEM_SHEETS === 'function') ? CLEAN_SYSTEM_SHEETS() : 'Function not found';
+           summary.RUN_MASTER_VERIFICATION = (typeof RUN_MASTER_VERIFICATION === 'function') ? RUN_MASTER_VERIFICATION() : 'Function not found';
+           summary.RUN_COMPLETE_SYSTEM_TEST = (typeof RUN_COMPLETE_SYSTEM_TEST === 'function') ? RUN_COMPLETE_SYSTEM_TEST() : 'Function not found';
+           result = JSON.stringify({ success: true, summary: summary });
+         } catch (ex) {
+           result = "Error executing RUN_MANUAL_SETUP: " + ex.message;
+         }
+      } else if (cmd === 'SEND_TEST_TELEGRAM') {
+         try {
+           var chat = e.parameter.chat || e.parameter.chatId || e.parameter.chat_id || e.parameter.chatid;
+           var text = e.parameter.text ? decodeURIComponent(e.parameter.text) : 'Test message from CLI';
+           if (!chat) {
+             result = JSON.stringify({ success: false, error: 'missing chat id' });
+           } else {
+             if (typeof sendTelegramLogged_ === 'function') {
+               var resp = sendTelegramLogged_(chat, text, {});
+               result = JSON.stringify({ success: resp.ok, code: resp.code, body: resp.body });
+             } else {
+               result = JSON.stringify({ success: false, error: 'sendTelegramLogged_ not available' });
+             }
+           }
+         } catch (ex) {
+           result = 'Error executing SEND_TEST_TELEGRAM: ' + ex.message;
+         }
+      } else if (cmd === 'DUMP_INGRESS_DEBUG') {
+         try {
+           var n = Number(e.parameter.n || 20) || 20;
+           result = (typeof DUMP_INGRESS_DEBUG === 'function') ? JSON.stringify(DUMP_INGRESS_DEBUG(n)) : "Function DUMP_INGRESS_DEBUG not found.";
+         } catch (ex) { result = "Error executing DUMP_INGRESS_DEBUG: " + ex.message; }
+      } else if (cmd === 'LIST_CLI') {
+         try {
+           var known = ['DEBUG_SHEETS_INFO','DEBUG_TELEGRAM_STATUS','RUN_MASTER_TESTS','RUN_AUTOMATED_CHECKLIST','ENSURE_ALL_SHEETS','CLEAN_CATEGORIES_SHEET','SETUP_BOT_COMMANDS','CLEAN_SYSTEM_SHEETS','RUN_MASTER_VERIFICATION','RUN_COMPLETE_SYSTEM_TEST','RUN_MANUAL_SETUP','SEND_TEST_TELEGRAM','DUMP_INGRESS_DEBUG'];
+           var available = known.map(function(k){
+             try { return { cmd: k, exists: (typeof eval(k) === 'function') }; } catch(e) { return { cmd: k, exists: false }; }
+           });
+           result = JSON.stringify({ success: true, available: available });
+         } catch (e) {
+           result = "Error listing CLI: " + e.message;
+         }
       } else {
         result = "Unknown command: " + cmd;
       }
@@ -51,6 +131,54 @@ function SOV1_UI_doGet_(e) {
     }
     return ContentService.createTextOutput(JSON.stringify({ result: result })).setMimeType(ContentService.MimeType.JSON);
   }
+
+// --- CLI helpers: quick debug utilities (safe, read-only) ---
+function DEBUG_TELEGRAM_STATUS() {
+  var props = PropertiesService.getScriptProperties();
+  var token = props.getProperty('TELEGRAM_TOKEN') || props.getProperty('TELEGRAM_BOT_TOKEN') || (typeof ENV !== 'undefined' ? ENV.TELEGRAM_TOKEN : null);
+  var chat = props.getProperty('TELEGRAM_CHAT_ID') || props.getProperty('TELEGRAM_CHATID') || (typeof ENV !== 'undefined' ? (ENV.CHAT_ID || ENV.CHANNEL_ID) : null);
+  var res = { tokenPresent: !!token, chatId: chat || null, botInfo: null, webhookInfo: null };
+  if (!token) return res;
+  try {
+    var botInfo = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/getMe', { muteHttpExceptions: true }).getContentText();
+    res.botInfo = JSON.parse(botInfo);
+  } catch (e) { res.botInfo = { error: e.message }; }
+  try {
+    var wh = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/getWebhookInfo', { muteHttpExceptions: true }).getContentText();
+    res.webhookInfo = JSON.parse(wh);
+  } catch (e) { res.webhookInfo = { error: e.message }; }
+  return res;
+}
+
+// CLI helper: send a direct test message to a chat and return the Telegram API response
+function SEND_TEST_TELEGRAM(chatId, text) {
+  chatId = String(chatId || '').trim();
+  if (!chatId) return { success: false, error: 'missing chatId' };
+  if (typeof sendTelegramLogged_ !== 'function') return { success: false, error: 'sendTelegramLogged_ not available' };
+  var r = sendTelegramLogged_(chatId, String(text || 'Test message from CLI'), {});
+  return { success: r.ok, code: r.code, body: r.body };
+}
+
+/**
+ * Return last n rows from Ingress_Debug as objects: { time, level, where, meta, raw }
+ */
+function DUMP_INGRESS_DEBUG(n) {
+  try {
+    n = Math.max(1, Math.min(100, Number(n) || 20));
+    var sh = _sheet('Ingress_Debug');
+    if (!sh) return { success: true, rows: [] };
+    var last = sh.getLastRow();
+    if (last < 2) return { success: true, rows: [] };
+    var start = Math.max(2, last - n + 1);
+    var rows = sh.getRange(start, 1, last - start + 1, 5).getValues();
+    var out = rows.map(function(r) {
+      return { time: r[0], level: r[1], where: r[2], meta: r[3], raw: r[4] };
+    });
+    return { success: true, rows: out };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
 
   var page = (e && e.parameter && e.parameter.page) ? String(e.parameter.page) : 'index';
   var file = 'index';
@@ -1908,10 +2036,247 @@ function SOV1_UI_testFullFlow() {
     
   } catch (e) {
     Logger.log('Test Full Flow Error: ' + e.message);
-    return { 
-      success: false, 
-      steps: steps,
-      error: e.message 
+    return { success: false, error: e.message };
+  }
+}
+
+// ============================================================================
+// ACCOUNT MANAGEMENT FUNCTIONS
+// ============================================================================
+
+/**
+ * Get all accounts for management UI
+ */
+function SOV1_UI_getAccountsManage_(token) {
+  if (!SOV1_UI_requireAuth_(token)) throw new Error('غير مصرح');
+  
+  var sAcc = _sheet('Accounts');
+  if (!sAcc) {
+    // If sheet doesn't exist, try to create with unified schema
+    if (typeof ensureAccountsSheet_ === 'function') {
+      sAcc = ensureAccountsSheet_();
+    } else {
+      return []; 
+    }
+  }
+  
+  var last = sAcc.getLastRow();
+  if (last < 2) return [];
+  
+  // Headers: ['الاسم', 'النوع', 'الرقم', 'البنك', 'الرصيد', 'آخر_تحديث', 'حسابي', 'تحويل_داخلي', 'أسماء_بديلة', 'ملاحظات']
+  var data = sAcc.getRange(2, 1, last - 1, 10).getValues();
+  var accounts = [];
+  
+  for (var i = 0; i < data.length; i++) {
+    var row = i + 2;
+    var name = String(data[i][0] || '').trim();
+    if (!name) continue;
+    
+    accounts.push({
+      row: row,
+      name: name,
+      type: String(data[i][1] || ''),
+      number: String(data[i][2] || ''),
+      bank: String(data[i][3] || ''),
+      balance: Number(data[i][4] || 0),
+      lastUpdate: data[i][5] ? Utilities.formatDate(data[i][5], Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm') : '',
+      isMine: String(data[i][6] || '').toUpperCase() === 'TRUE',
+      isInternal: String(data[i][7] || '').toUpperCase() === 'TRUE',
+      aliases: String(data[i][8] || ''),
+      notes: String(data[i][9] || '')
+    });
+  }
+  
+  return accounts;
+}
+
+/**
+ * Add a new account
+ */
+function SOV1_UI_addAccount_manage_(token, name, number, bank, balance) {
+  if (!SOV1_UI_requireAuth_(token)) throw new Error('غير مصرح');
+  
+  name = String(name || '').trim();
+  number = String(number || '').trim();
+  bank = String(bank || '').trim();
+  balance = Number(balance || 0);
+  
+  if (!name) throw new Error('اسم الحساب مطلوب');
+  
+  var sAcc = _sheet('Accounts');
+  if (!sAcc) {
+    if (typeof ensureBalancesSheet_ === 'function') {
+      sAcc = ensureBalancesSheet_();
+    } else {
+      throw new Error('جدول الحسابات غير موجود');
+    }
+  }
+  
+  // Check if number already exists
+  if (number) {
+    var data = sAcc.getRange(2, 3, Math.max(1, sAcc.getLastRow() - 1), 1).getValues();
+    for (var i = 0; i < data.length; i++) {
+      if (String(data[i][0]) === number) {
+        throw new Error('رقم الحساب موجود مسبقاً');
+      }
+    }
+  }
+  
+  // Append new account
+  // ['الاسم', 'النوع', 'الرقم', 'البنك', 'الرصيد', 'آخر_تحديث', 'حسابي', 'SMS_Pattern', 'أسماء_بديلة', 'ملاحظات']
+  sAcc.appendRow([
+    name, 
+    'حساب', 
+    number, 
+    bank, 
+    balance, 
+    new Date(), 
+    'TRUE', 
+    '', 
+    '', 
+    ''
+  ]);
+  
+  // Invalidate caches if DataLinkage exists
+  if (typeof invalidateAllCaches_ === 'function') {
+    invalidateAllCaches_();
+  }
+  
+  return { ok: true, name: name };
+}
+
+/**
+ * Update an account
+ */
+function SOV1_UI_updateAccount_manage_(token, row, name, number, bank, balance, isMine) {
+  if (!SOV1_UI_requireAuth_(token)) throw new Error('غير مصرح');
+  
+  row = Number(row || 0);
+  if (row < 2) throw new Error('رقم الصف غير صحيح');
+  
+  var sAcc = _sheet('Accounts');
+  if (!sAcc) throw new Error('جدول الحسابات غير موجود');
+  
+  name = String(name || '').trim();
+  if (!name) throw new Error('اسم الحساب مطلوب');
+  
+  // Ensure strict boolean
+  var isMineVal = (isMine === true || isMine === 'true' || isMine === 'TRUE') ? 'TRUE' : 'FALSE';
+  
+  // Update columns: Name(A), Number(C), Bank(D), Balance(E), LastUpdate(F), IsMine(G)
+  // Indexes (1-based): 1, 3, 4, 5, 6, 7
+  
+  sAcc.getRange(row, 1).setValue(name);
+  sAcc.getRange(row, 3).setValue(number);
+  sAcc.getRange(row, 4).setValue(bank);
+  sAcc.getRange(row, 5).setValue(Number(balance||0));
+  sAcc.getRange(row, 6).setValue(new Date());
+  sAcc.getRange(row, 7).setValue(isMineVal);
+  
+  if (typeof invalidateAllCaches_ === 'function') {
+    invalidateAllCaches_();
+  }
+  
+  return { ok: true, row: row };
+}
+
+/**
+ * Delete an account
+ */
+function SOV1_UI_deleteAccount_manage_(token, row) {
+  if (!SOV1_UI_requireAuth_(token)) throw new Error('غير مصرح');
+  
+  row = Number(row || 0);
+  if (row < 2) throw new Error('رقم الصف غير صحيح');
+  
+  var sAcc = _sheet('Accounts');
+  if (!sAcc) throw new Error('جدول الحسابات غير موجود');
+  
+  var name = sAcc.getRange(row, 1).getValue();
+  
+  // Hard delete the row
+  sAcc.deleteRow(row);
+  
+  if (typeof invalidateAllCaches_ === 'function') {
+    invalidateAllCaches_();
+  }
+  
+  return { ok: true, name: name };
+}
+
+// ============================================================================
+// CATEGORY MANAGEMENT FUNCTIONS
+// ============================================================================
+
+/**
+ * Get all categories for management
+ */
+function SOV1_UI_getCategoriesManage(token) {
+  try {
+    return SOV1_UI_getCategoriesManage_(token);
+  } catch (e) {
+    Logger.log('Error in SOV1_UI_getCategoriesManage: ' + e);
+    return [];
+  }
+}
+
+/**
+ * Add new category
+ */
+function SOV1_UI_addCategory(token, name, icon, color) {
+  try {
+    return SOV1_UI_addCategory_(token, name, icon, color);
+  } catch (e) {
+    Logger.log('Error in SOV1_UI_addCategory: ' + e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Update category
+ */
+function SOV1_UI_updateCategory(token, row, name, icon, color, active) {
+  try {
+    return SOV1_UI_updateCategory_(token, row, name, icon, color, active);
+  } catch (e) {
+    Logger.log('Error in SOV1_UI_updateCategory: ' + e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Delete category
+ */
+function SOV1_UI_deleteCategory(token, row) {
+  try {
+    return SOV1_UI_deleteCategory_(token, row);
+  } catch (e) {
+    Logger.log('Error in SOV1_UI_deleteCategory: ' + e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Clean up categories system-wide
+ */
+function SOV1_UI_cleanupCategories(token) {
+  try {
+    if (!SOV1_UI_requireAuth_(token)) throw new Error('غير مصرح');
+    
+    // Use CategoryManager functions if available
+    if (typeof performFullCategoryCleanup_ === 'function') {
+      var result = performFullCategoryCleanup_();
+      return result;
+    }
+    
+    // Fallback to basic cleanup
+    var cleaned = SOV1_CLEAN_TEST_CATEGORIES_();
+    return {
+      success: true,
+      message: 'تم تنظيف ' + cleaned.categories + ' تصنيف، ' + cleaned.transactions + ' معاملة، ' + cleaned.budgets + ' ميزانية'
     };
+  } catch (e) {
+    Logger.log('Error in SOV1_UI_cleanupCategories: ' + e);
+    return { success: false, error: e.message };
   }
 }

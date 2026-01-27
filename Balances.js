@@ -23,21 +23,38 @@ function ensureBalancesSheet_() {
 }
 
 /**
+ * Get full account info by number/key
+ */
+function getAccountInfo_(accountKey) {
+  var sh = ensureBalancesSheet_();
+  var lastRow = sh.getLastRow();
+  if (lastRow < 2) return null;
+  
+  // Columns: Name(0), Type(1), Number(2), Bank(3), Balance(4), LastUpdate(5), IsMine(6)
+  var data = sh.getRange(2, 1, lastRow - 1, 7).getValues();
+  
+  for (var i = 0; i < data.length; i++) {
+    if (String(data[i][2] || '') === String(accountKey || '')) {
+      return {
+        row: i + 2,
+        name: String(data[i][0]),
+        type: String(data[i][1]),
+        number: String(data[i][2]),
+        bank: String(data[i][3]),
+        balance: Number(data[i][4] || 0),
+        isMine: String(data[i][6] || '').toUpperCase() === 'TRUE'
+      };
+    }
+  }
+  return null;
+}
+
+/**
  * Get balance for an account by its number (last 4 digits)
  */
 function getBalance_(accountKey) {
-  var sh = ensureBalancesSheet_();
-  var lastRow = sh.getLastRow();
-  if (lastRow < 2) return 0;
-  
-  // Column C = الرقم, Column E = الرصيد
-  var data = sh.getRange(2, 3, lastRow - 1, 3).getValues(); // C, D, E
-  for (var i = 0; i < data.length; i++) {
-    if (String(data[i][0] || '') === String(accountKey || '')) {
-      return Number(data[i][2] || 0); // Column E
-    }
-  }
-  return 0;
+  var info = getAccountInfo_(accountKey);
+  return info ? info.balance : 0;
 }
 
 /**
@@ -45,21 +62,16 @@ function getBalance_(accountKey) {
  */
 function setBalance_(accountKey, newBalance) {
   var sh = ensureBalancesSheet_();
-  var lastRow = sh.getLastRow();
+  var info = getAccountInfo_(accountKey);
   
-  if (lastRow >= 2) {
-    var data = sh.getRange(2, 3, lastRow - 1, 1).getValues(); // Column C (الرقم)
-    for (var i = 0; i < data.length; i++) {
-      if (String(data[i][0] || '') === String(accountKey || '')) {
-        sh.getRange(i + 2, 5).setValue(Number(newBalance || 0));  // Column E (الرصيد)
-        sh.getRange(i + 2, 6).setValue(new Date());  // Column F (آخر_تحديث)
-        return;
-      }
-    }
+  if (info) {
+    sh.getRange(info.row, 5).setValue(Number(newBalance || 0));
+    sh.getRange(info.row, 6).setValue(new Date());
+  } else {
+    // Account not found, add it
+    // Default to isMine=TRUE for new accounts unless specified otherwise
+    sh.appendRow(['حساب ' + accountKey, 'حساب', String(accountKey || ''), '', Number(newBalance || 0), new Date(), 'TRUE', '', '', '']);
   }
-  
-  // Account not found, add it
-  sh.appendRow(['حساب ' + accountKey, 'حساب', String(accountKey || ''), '', Number(newBalance || 0), new Date(), 'TRUE', '', '', '']);
 }
 
 /**
@@ -156,6 +168,34 @@ function getAllBalancesHTML_() {
 }
 
 /**
+ * Find account by name or bank (fuzzy match)
+ */
+function findAccountByNameOrBank_(text) {
+  if (!text) return null;
+  text = String(text).toLowerCase().trim();
+  
+  var sh = ensureBalancesSheet_();
+  var data = sh.getDataRange().getValues(); // Cache entire sheet
+  
+  for (var i = 1; i < data.length; i++) {
+    var name = String(data[i][0] || '').toLowerCase(); // Name
+    var bank = String(data[i][3] || '').toLowerCase(); // Bank
+    var isMine = String(data[i][6] || '').toUpperCase() === 'TRUE';
+    var aliases = String(data[i][8] || '').toLowerCase(); // Aliases
+    
+    // Check if text matches name, bank, or aliases
+    if (name === text || bank === text || (aliases && aliases.indexOf(text) !== -1)) {
+        return {
+          row: i + 1,
+          number: String(data[i][2]),
+          isMine: isMine
+        };
+    }
+  }
+  return null;
+}
+
+/**
  * تحديث أرصدة الحسابات بعد كل معاملة
  * يتم استدعاؤها من saveTransaction
  */
@@ -167,10 +207,16 @@ function updateBalancesAfterTransaction_(data) {
     var amount = Number(data.amount) || 0;
     var isIncoming = !!data.isIncoming;
     
-    // تحديث رصيد الحساب
+    // تحديث رصيد الحساب (المصدر)
     var newBalance = applyTxnToBalance_(accNum, amount, isIncoming);
     
-    // تتبع الديون إذا كانت حوالة لشخص
+    // إرسال إشعار الرصيد للمصدر (فقط إذا كان حسابي)
+    var srcInfo = getAccountInfo_(accNum);
+    if (srcInfo && srcInfo.isMine) {
+      sendBalanceUpdateNotification_(accNum, newBalance, data);
+    }
+
+    // تتبع الديون (إذا لم يكن تحويل داخلي)
     if (data.merchant && data.merchant !== 'غير محدد') {
       updateDebtTracking_(data);
     }
@@ -179,6 +225,63 @@ function updateBalancesAfterTransaction_(data) {
   } catch (e) {
     Logger.log('Error updating balance: ' + e);
     return null;
+  }
+}
+
+/**
+ * معالجة التحويل الداخلي بين الحسابات
+ * @param {string} sourceAcc - الحساب المرسل
+ * @param {string} destAcc - الحساب المستلم
+ * @param {number} amount - المبلغ
+ */
+function handleInternalTransfer_(sourceAcc, destAcc, amount) {
+  if (!sourceAcc || !destAcc || !amount) return;
+  
+  // خصم من المصدر
+  var srcBal = applyTxnToBalance_(sourceAcc, amount, false); // خصم
+  
+  // إضافة للمستلم
+  var destBal = applyTxnToBalance_(destAcc, amount, true); // إضافة
+  
+  // إشعار للحسابين (إذا كانوا لي)
+  var srcInfo = getAccountInfo_(sourceAcc);
+  if (srcInfo && srcInfo.isMine) {
+     sendBalanceUpdateNotification_(sourceAcc, srcBal, { amount: amount, isIncoming: false, merchant: 'تحويل إلى ' + destAcc });
+  }
+  
+  var destInfo = getAccountInfo_(destAcc);
+  if (destInfo && destInfo.isMine) {
+     sendBalanceUpdateNotification_(destAcc, destBal, { amount: amount, isIncoming: true, merchant: 'تحويل من ' + sourceAcc });
+  }
+}
+
+/**
+ * إرسال إشعار تحديث الرصيد بعد العملية (تلقائياً)
+ */
+function sendBalanceUpdateNotification_(accountKey, newBalance, txnData) {
+  var hub = (typeof getHubChatId_ === 'function') ? getHubChatId_() : (ENV.CHAT_ID||'');
+  if (!hub) return;
+  
+  // تحقق من الإعدادات قبل الإرسال (اختياري)
+  if (typeof areNotificationsEnabled === 'function' && !areNotificationsEnabled()) return;
+
+  var amount = Number(txnData.amount || 0);
+  var merchant = txnData.merchant || 'غير محدد';
+  var isIncoming = !!txnData.isIncoming;
+  var emoji = isIncoming ? '💰' : '💸';
+  
+  var msg = 
+    '🏦 <b>تحديث رصيد الحساب</b>\n' +
+    '━━━━━━━━━━━━━━━━━━━\n\n' +
+    '💳 <b>العملية:</b> ' + (isIncoming ? 'إيداع/وارد' : 'شراء/خصم') + '\n' +
+    '💼 <b>الحساب:</b> ' + accountKey + '\n' +
+    emoji + ' <b>المبلغ:</b> ' + amount.toFixed(2) + ' SAR\n' +
+    '🏪 <b>الجهة:</b> ' + merchant + '\n\n' +
+    '💰 <b>الرصيد الجديد:</b> ' + Number(newBalance || 0).toFixed(2) + ' SAR\n\n' +
+    '📝 <i>ملاحظة: الرصيد تقديري</i>';
+
+  if (typeof sendTelegram_ === 'function') {
+    sendTelegram_(hub, msg);
   }
 }
 

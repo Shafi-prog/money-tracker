@@ -4,6 +4,7 @@ package-lock.json
 
 # CLASP credentials (IMPORTANT: DO NOT COMMIT!)
 .clasprc.json
+creds.json
 .clasp.json
 
 # Google Apps Script pull files

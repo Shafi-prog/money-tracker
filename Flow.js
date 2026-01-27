@@ -205,6 +205,18 @@ function saveTransaction(data, raw, source) {
   // ✅ Input Validation - التحقق من صحة البيانات
   data = data || {};
   
+  // Check strict exclusions (like OTPs if setting says so)
+  // Classifier.js marks them with excludeFromStats = true
+  if (data.excludeFromStats === true) {
+    // Check setting explicitly
+    var saveTemp = PropertiesService.getScriptProperties().getProperty('SAVE_TEMP_CODES') === 'true';
+    if (!saveTemp) {
+      Logger.log('Ignoring OTP/Verification transaction because SAVE_TEMP_CODES is false');
+      return { uuid: 'SKIPPED_OTP', status: 'skipped' };
+    }
+    // If saving is enabled, we continue but ensure it's marked as 'تحقق'
+  }
+  
   // تنظيف وتحقق من المبلغ
   var amount = Math.abs(Number(data.amount) || 0);
   if (amount > 10000000) {
@@ -228,14 +240,16 @@ function saveTransaction(data, raw, source) {
   source = sanitizeString(source, 50) || 'غير معروف';
   
   var now = new Date();
+  var uuid = generateShortUUID_(); // Generate UUID for tracking
 
   var s1 = _sheet('Sheet1');
   var sB = _sheet('Budgets');
   var sD = _sheet('Debt_Ledger');
   var sDash = _sheet('Dashboard'); // خام اختياري
 
-  // 1) Sheet1
+  // 1) Sheet1 - with UUID tracking
   s1.appendRow([
+    uuid, // UUID for cross-sheet tracking
     now,
     'V120_AUTO',
     'اليوم',
@@ -296,32 +310,56 @@ function saveTransaction(data, raw, source) {
     }
   }
 
-  // 3) Debt_Ledger — ✅ تحديث الرصيد في العمود E
+  // 3) Internal Transfers & Debt Logic
   var dBal = 0;
+  var balancesUpdated = false;
+
   try {
     if (internal) {
-      var party = merchant;
-      var debtor = data.isIncoming ? amount : 0;    // مدين
-      var creditor = data.isIncoming ? 0 : amount;  // دائن
-      var desc = (data.isIncoming ? 'حوالة داخلية واردة' : 'حوالة داخلية صادرة') + ' - ' + party;
+      // محاولة استخراج الحساب المستلم (للتحويل بين حساباتي)
+      var destAcc = null;
+      var rawStr = String(raw || '').toLowerCase();
+      
+      // 1. Regex (Numbers)
+      var mCard = rawStr.match(/(?:account|acc|card|ila|to|il|beneficiary)\s*[:#\-]?\s*\*?(\d{4})/i);
+      if (mCard) destAcc = mCard[1];
 
-      // أضف الصف
-      sD.appendRow([now, party, debtor, creditor, '', desc]);
-
-      // ضع صيغة الرصيد في العمود E للصف الأخير
-      var lastRow = sD.getLastRow();
-      if (lastRow === 2) {
-        // أول قيد بعد الهيدر
-        sD.getRange(lastRow, 5).setFormula('=D2-C2');
-      } else if (lastRow > 2) {
-        // رصيد تراكمي
-        // = E(prev) + D(this) - C(this)
-        sD.getRange(lastRow, 5).setFormulaR1C1('=R[-1]C + RC[-1] - RC[-2]');
+      // 2. Name Match (if no digits found)
+      if (!destAcc && merchant && typeof findAccountByNameOrBank_ === 'function') {
+         var found = findAccountByNameOrBank_(merchant);
+         if (found && found.isMine) destAcc = found.number;
       }
+      
+      // إذا وجدنا حساب مستلم، نعالجه كتحويل داخلي بين الحسابات
+      if (destAcc && typeof handleInternalTransfer_ === 'function') {
+        Logger.log('🔄 Detected Self-Transfer: ' + accNum + ' -> ' + destAcc);
+        handleInternalTransfer_(accNum, destAcc, amount);
+        balancesUpdated = true; 
+      } else {
+        // وإلا، نعالجه كدين (لشخص آخر) في Debt_Ledger
+        var party = merchant;
+        var debtor = data.isIncoming ? amount : 0;    // مدين
+        var creditor = data.isIncoming ? 0 : amount;  // دائن
+        var desc = (data.isIncoming ? 'حوالة داخلية واردة' : 'حوالة داخلية صادرة') + ' - ' + party;
 
-      SpreadsheetApp.flush();
-      try { dBal = Number(sD.getRange(lastRow, 5).getValue()) || 0; } catch (e1) {
-        Logger.log('Debt balance read error: ' + e1.message);
+        // أضف الصف
+        sD.appendRow([uuid, now, party, debtor, creditor, '', desc]);
+
+        // ضع صيغة الرصيد في العمود E للصف الأخير
+        var lastRow = sD.getLastRow();
+        if (lastRow === 2) {
+          // أول قيد بعد الهيدر
+          sD.getRange(lastRow, 5).setFormula('=D2-C2');
+        } else if (lastRow > 2) {
+          // رصيد تراكمي
+          // = E(prev) + D(this) - C(this)
+          sD.getRange(lastRow, 5).setFormulaR1C1('=R[-1]C + RC[-1] - RC[-2]');
+        }
+
+        SpreadsheetApp.flush();
+        try { dBal = Number(sD.getRange(lastRow, 5).getValue()) || 0; } catch (e1) {
+          Logger.log('Debt balance read error: ' + e1.message);
+        }
       }
     }
   } catch (eD) {
@@ -330,14 +368,14 @@ function saveTransaction(data, raw, source) {
 
   // 4) Dashboard raw (اختياري)
   try {
-    sDash.appendRow([now, merchant, amount, category, source]);
+    sDash.appendRow([uuid, now, merchant, amount, category, source]);
   } catch (eDash) {
     Logger.log('Dashboard append error: ' + eDash.message);
   }
 
-  // 5) ✅ تحديث الأرصدة وتتبع الديون
+  // 5) ✅ تحديث الأرصدة وتتبع الديون (إذا لم يتم تحديثها سابقاً)
   try {
-    if (typeof updateBalancesAfterTransaction_ === 'function') {
+    if (!balancesUpdated && typeof updateBalancesAfterTransaction_ === 'function') {
       updateBalancesAfterTransaction_({
         accNum: accNum,
         cardNum: cardNum,

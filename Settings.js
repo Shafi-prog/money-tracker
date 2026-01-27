@@ -32,13 +32,13 @@ function getSettings() {
     // Auto-create Config sheet if missing
     if (!config) {
       config = ss.insertSheet('Config');
-      config.getRange(1, 1, 1, 10).setValues([[
+      config.getRange(1, 1, 1, 11).setValues([[
         'Status', 'Name', 'Email', 'Currency', 'Language', 'Salary_Day', 
-        'Notifications', 'Auto_Apply_Rules', 'Telegram_Notifications', 'Budget_Alerts'
+        'Notifications', 'Auto_Apply_Rules', 'Telegram_Notifications', 'Budget_Alerts', 'Save_Temp_Codes'
       ]]);
-      config.getRange(2, 1, 1, 10).setValues([[
+      config.getRange(2, 1, 1, 11).setValues([[
         'ACTIVE', '', Session.getActiveUser().getEmail(), 'SAR', 'ar', 1, 
-        true, true, true, true
+        true, true, true, true, false
       ]]);
       Logger.log('✅ Auto-created Config sheet with defaults');
     }
@@ -53,7 +53,8 @@ function getSettings() {
       enable_notifications: config.getRange('G2').getValue() !== 'false',
       auto_apply_rules: config.getRange('H2').getValue() !== 'false',
       telegram_notifications: config.getRange('I2').getValue() !== 'false',
-      budget_alerts: config.getRange('J2').getValue() !== 'false'
+      budget_alerts: config.getRange('J2').getValue() !== 'false',
+      save_temp_codes: config.getRange('K2').getValue() === true || config.getRange('K2').getValue() === 'true'
     };
     
     return {
@@ -75,7 +76,8 @@ function getSettings() {
         enable_notifications: true,
         telegram_notifications: true,
         budget_alerts: true,
-        auto_apply_rules: true
+        auto_apply_rules: true,
+        save_temp_codes: false
       }
     };
   }
@@ -140,6 +142,13 @@ function saveSettings(settingsData) {
     config.getRange('H' + row).setValue(settingsData.auto_apply_rules ? 'true' : 'false');
     config.getRange('I' + row).setValue(settingsData.telegram_notifications !== false ? 'true' : 'false');
     config.getRange('J' + row).setValue(settingsData.budget_alerts !== false ? 'true' : 'false');
+    config.getRange('K' + row).setValue(settingsData.save_temp_codes ? 'true' : 'false');
+    
+    // Sync critical settings to ScriptProperties for fast access
+    const props = PropertiesService.getScriptProperties();
+    props.setProperty('DEFAULT_CURRENCY', settingsData.default_currency || 'USD');
+    props.setProperty('LANGUAGE', settingsData.language || 'ar');
+    props.setProperty('SAVE_TEMP_CODES', settingsData.save_temp_codes ? 'true' : 'false');
     
     // Mark onboarding as complete
     config.getRange('A' + row).setValue('SETTINGS_SAVED');

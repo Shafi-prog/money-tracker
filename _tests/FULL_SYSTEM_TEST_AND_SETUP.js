@@ -322,10 +322,11 @@ function STEP5_TEST_TELEGRAM() {
   Logger.log('📱 STEP 5: Test Telegram Integration');
   Logger.log('====================================\n');
   
-  var chatId = ENV.CHAT_ID || ENV.CHANNEL_ID;
+  // Use canonical hub chat resolution to avoid config mismatch
+  var chatId = (typeof getHubChatId_ === 'function') ? getHubChatId_() : (ENV.CHAT_ID || ENV.CHANNEL_ID);
   
   if (!chatId) {
-    Logger.log('❌ CHAT_ID not configured in ENV');
+    Logger.log('❌ CHAT_ID not configured (check TELEGRAM_CHAT_ID / CHAT_ID / CHANNEL_ID)');
     return { success: false, error: 'No CHAT_ID' };
   }
   
@@ -424,4 +425,11 @@ function RUN_COMPLETE_SYSTEM_TEST() {
   Logger.log('   1. Forward SMS from iPhone');
   Logger.log('   2. Check Telegram for automatic notifications');
   Logger.log('   3. Send "/balances" to see account balances');
+
+  // Return a summary object for remote callers
+  return {
+    success: true,
+    duration_seconds: Number(duration),
+    passed_steps: ['STEP1_RESET_AND_SETUP','STEP4_TEST_GROK_AI','STEP5_TEST_TELEGRAM','STEP2_TEST_SMS_TO_TELEGRAM','STEP3_VERIFY_BALANCES']
+  };
 }

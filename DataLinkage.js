@@ -119,18 +119,20 @@ function buildAccountsIndex_() {
     var sh = _sheet('Accounts');
     var lastRow = sh.getLastRow();
     if (lastRow >= 2) {
-      var rows = sh.getRange(2, 1, lastRow - 1, 7).getValues();
+      // Unified Accounts schema (10 columns):
+      // [الاسم, النوع, الرقم, البنك, الرصيد, آخر_تحديث, حسابي, تحويل_داخلي, أسماء_بديلة, ملاحظات]
+      var rows = sh.getRange(2, 1, lastRow - 1, 10).getValues();
       rows.forEach(function(r) {
-        var num = String(r[2] || '').trim();
+        var num = String(r[2] || '').trim(); // الرقم
         if (num) {
           index.byNumber[num] = {
             number: num,
-            name: String(r[0] || ''),
-            type: String(r[1] || 'حساب'),
-            bank: String(r[3] || ''),
-            aliases: String(r[4] || ''),
-            isMine: String(r[5] || '').toLowerCase() === 'true',
-            isInternal: String(r[6] || '').toLowerCase() === 'true',
+            name: String(r[0] || ''),              // الاسم
+            type: String(r[1] || 'حساب'),          // النوع
+            bank: String(r[3] || ''),              // البنك
+            aliases: String(r[8] || ''),           // أسماء_بديلة
+            isMine: String(r[6] || '').toLowerCase() === 'true',      // حسابي
+            isInternal: String(r[7] || '').toLowerCase() === 'true',  // تحويل_داخلي
             source: 'Accounts_Sheet'
           };
           
@@ -197,7 +199,7 @@ function updateAccountBalance_(accountNumber, amount, isIncoming) {
     
     // Ensure headers exist
     if (sh.getLastRow() === 0) {
-      sh.appendRow(['الاسم', 'النوع', 'الرقم', 'البنك', 'الرصيد', 'آخر_تحديث', 'حسابي', 'SMS_Pattern', 'أسماء_بديلة', 'ملاحظات']);
+      sh.appendRow(['الاسم', 'النوع', 'الرقم', 'البنك', 'الرصيد', 'آخر_تحديث', 'حسابي', 'تحويل_داخلي', 'أسماء_بديلة', 'ملاحظات']);
       sh.setFrozenRows(1);
     }
     
@@ -222,7 +224,7 @@ function updateAccountBalance_(accountNumber, amount, isIncoming) {
     // If account not found, add it
     if (!found) {
       var initialBalance = isIncoming ? amount : -amount;
-      sh.appendRow(['حساب ' + accountNumber, 'حساب', accountNumber, '', initialBalance, new Date(), 'TRUE', '', '', '']);
+      sh.appendRow(['حساب ' + accountNumber, 'حساب', accountNumber, '', initialBalance, new Date(), 'TRUE', 'FALSE', '', '']);
     }
     
     // Invalidate cache

@@ -63,12 +63,20 @@ function preParseFallback(text) {
   var amtMatch = t.match(/(\d[\d,\.]*)\s*(SAR|ريال(?:\s*سعودي)?)/i);
   var amt = amtMatch ? Number(String(amtMatch[1]).replace(/[,]/g, '')) : 0;
 
-  var incoming = /(وارد|إيداع|استلام|إضافة)/i.test(t);
-  var outgoing = /(خصم|شراء|سحب|رسوم|POS|صادر)/i.test(t);
+  var incoming = /(وارد|إيداع|استلام|إضافة|deposit|received)/i.test(t);
+  var outgoing = /(خصم|شراء|سحب|رسوم|POS|صادر|paid|purchase)/i.test(t);
 
+  // Enhanced Account Detection
   var accMatch = t.match(/حساب(?:\s*رقم)?\s*(\d{3,})/i);
   var cardMatch = t.match(/(?:بطاقة|بطاقه|كارت)\s*(\d{3,})/i);
-
+  
+  // Use known accounts if available
+  var ownAccounts = (ENV.OWN_ACCOUNTS || '').split(',').map(function(x){return x.trim();}).filter(Boolean);
+  var detectedAcc = accMatch ? accMatch[1] : '';
+  
+  // If multiple accounts found, or specifically "to account", logic can remain simple context-based for fallback
+  // The goal is to provide a "seed" to AI.
+  
   var merchMatch = t.match(/من\s+([^\s]+)|إلى\s+([^\s]+)/i);
   var merchant = (merchMatch && (merchMatch[1] || merchMatch[2])) ? (merchMatch[1] || merchMatch[2]) : 'غير محدد';
 
@@ -86,8 +94,9 @@ function preParseFallback(text) {
     category: cat,
     type: type,
     isIncoming: incoming ? true : (outgoing ? false : (amt >= 0)),
-    accNum: accMatch ? accMatch[1] : '',
-    cardNum: cardMatch ? cardMatch[1] : ''
+    accNum: detectedAcc,
+    cardNum: cardMatch ? cardMatch[1] : '',
+    ownAccountsHint: ownAccounts // Hint for debugging
   };
 }
 
