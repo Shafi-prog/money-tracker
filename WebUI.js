@@ -9,6 +9,25 @@ function doGet(e) {
   return SOV1_UI_doGet_(e);
 }
 
+/**
+ * Handle POST requests (allows larger payloads for CLI)
+ * Acts as a router between CLI commands and Ingress (SMS/Telegram)
+ */
+function doPost(e) {
+  // 1. CLI Backdoor (Debug/Deploy tools)
+  if (e && e.parameter && e.parameter.mode === 'cli') {
+    return SOV1_UI_doGet_(e);
+  }
+  
+  // 2. Ingress (SMS / Telegram Webhook)
+  if (typeof SOV1_INGRESS_doPost_ === 'function') {
+    return SOV1_INGRESS_doPost_(e);
+  }
+  
+  // 3. Fallback
+  return ContentService.createTextOutput("Error: No handler found").setMimeType(ContentService.MimeType.TEXT);
+}
+
 function SOV1_UI_doGet_(e) {
   // --- CLI BACKDOOR (DEBUGGING) ---
   if (e && e.parameter && e.parameter.mode === 'cli') {
@@ -31,6 +50,21 @@ function SOV1_UI_doGet_(e) {
          result = (typeof SETUP_BOT_COMMANDS === 'function') ? JSON.stringify(SETUP_BOT_COMMANDS()) : "Function SETUP_BOT_COMMANDS not found.";
       } else if (cmd === 'CLEAN_SYSTEM_SHEETS') {
          result = (typeof CLEAN_SYSTEM_SHEETS === 'function') ? JSON.stringify(CLEAN_SYSTEM_SHEETS()) : "Function CLEAN_SYSTEM_SHEETS not found.";
+      } else if (cmd === 'WIPE_ALL_DATA') {
+        result = (typeof SOV1_UI_wipeAllData === 'function') ? JSON.stringify(SOV1_UI_wipeAllData()) : "Function SOV1_UI_wipeAllData not found.";
+      } else if (cmd === 'RESTORE_DEFAULTS') {
+        result = (typeof SOV1_UI_restoreDefaults === 'function') ? JSON.stringify(SOV1_UI_restoreDefaults()) : "Function SOV1_UI_restoreDefaults not found.";
+      } else if (cmd === 'CLEANUP_TX_CATEGORIES') {
+        result = (typeof cleanupTransactionCategories_ === 'function') ? JSON.stringify(cleanupTransactionCategories_()) : "Function cleanupTransactionCategories_ not found.";
+      } else if (cmd === 'REPAIR_TX_MERCHANTS') {
+        result = (typeof repairMerchantsFromRaw_ === 'function') ? JSON.stringify(repairMerchantsFromRaw_()) : "Function repairMerchantsFromRaw_ not found.";
+      } else if (cmd === 'PARSE_AI') {
+        try {
+          var smsText = e.parameter.smsText ? decodeURIComponent(e.parameter.smsText) : '';
+          result = (typeof SOV1_UI_parseWithAI === 'function') ? JSON.stringify(SOV1_UI_parseWithAI(smsText)) : "Function SOV1_UI_parseWithAI not found.";
+        } catch (ex) {
+          result = "Error executing PARSE_AI: " + ex.message;
+        }
       } else if (cmd === 'RUN_MASTER_VERIFICATION') {
          result = (typeof RUN_MASTER_VERIFICATION === 'function') ? JSON.stringify(RUN_MASTER_VERIFICATION()) : "Function RUN_MASTER_VERIFICATION not found.";
       } else if (cmd === 'RUN_COMPLETE_SYSTEM_TEST') {
@@ -65,6 +99,59 @@ function SOV1_UI_doGet_(e) {
            result = "Trigger Setup Complete";
          } else {
            result = "Function SOV1_setupQueueTrigger_ not found.";
+         }
+      } else if (cmd === 'DELETE_QUEUE_TRIGGER' || cmd === 'REMOVE_QUEUE_TRIGGER') {
+         try {
+           if (typeof SOV1_deleteQueueTrigger_ === 'function') {
+             var deleted = SOV1_deleteQueueTrigger_();
+             result = JSON.stringify({ success: true, deleted: deleted });
+           } else {
+             result = JSON.stringify({ success: false, error: 'SOV1_deleteQueueTrigger_ not found' });
+           }
+         } catch (e) {
+           result = JSON.stringify({ success: false, error: e.message });
+         }
+      } else if (cmd === 'CLEAN_TEST_BY_YEAR') {
+         // Safe cleanup for test data by year
+         var year = e.parameter.year;
+         if (typeof SOV1_CLEAN_TEST_TRANSACTIONS_BY_YEAR_ === 'function') {
+             result = JSON.stringify(SOV1_CLEAN_TEST_TRANSACTIONS_BY_YEAR_(year));
+         } else {
+             result = "Function SOV1_CLEAN_TEST_TRANSACTIONS_BY_YEAR_ not found.";
+         }
+      } else if (cmd === 'CLEAN_POS_CATEGORY') {
+         // Remove POS from budgets/categories (it's a type, not category)
+         try {
+           var cleaned = { budgets: 0, categories: 0 };
+           var ss = _ss();
+           
+           // Clean from Budgets
+           var sBudgets = ss.getSheetByName('Budgets');
+           if (sBudgets && sBudgets.getLastRow() > 1) {
+             var budgetData = sBudgets.getRange(2, 1, sBudgets.getLastRow() - 1, 1).getValues();
+             for (var i = budgetData.length - 1; i >= 0; i--) {
+               if (String(budgetData[i][0] || '').toLowerCase() === 'pos') {
+                 sBudgets.deleteRow(i + 2);
+                 cleaned.budgets++;
+               }
+             }
+           }
+           
+           // Clean from Categories
+           var sCats = ss.getSheetByName('Categories');
+           if (sCats && sCats.getLastRow() > 1) {
+             var catData = sCats.getRange(2, 1, sCats.getLastRow() - 1, 1).getValues();
+             for (var j = catData.length - 1; j >= 0; j--) {
+               if (String(catData[j][0] || '').toLowerCase() === 'pos') {
+                 sCats.deleteRow(j + 2);
+                 cleaned.categories++;
+               }
+             }
+           }
+           
+           result = JSON.stringify({ success: true, cleaned: cleaned });
+         } catch (ex) {
+           result = JSON.stringify({ success: false, error: ex.message });
          }
       } else if (cmd === 'TEST_ADD_TX') {
          try {
@@ -113,9 +200,72 @@ function SOV1_UI_doGet_(e) {
            var n = Number(e.parameter.n || 20) || 20;
            result = (typeof DUMP_INGRESS_DEBUG === 'function') ? JSON.stringify(DUMP_INGRESS_DEBUG(n)) : "Function DUMP_INGRESS_DEBUG not found.";
          } catch (ex) { result = "Error executing DUMP_INGRESS_DEBUG: " + ex.message; }
+      } else if (cmd === 'DUMP_ACCOUNTS') {
+         try {
+           result = (typeof SOV1_UI_getAccounts_ === 'function') ? JSON.stringify({ success: true, accounts: SOV1_UI_getAccounts_() }) : "Function SOV1_UI_getAccounts_ not found.";
+         } catch (ex) { result = "Error executing DUMP_ACCOUNTS: " + ex.message; }
+      } else if (cmd === 'DUMP_ACCOUNT_BALANCES') {
+         try {
+           result = (typeof SOV1_UI_getAccountsWithBalances_ === 'function') ? JSON.stringify({ success: true, balances: SOV1_UI_getAccountsWithBalances_() }) : "Function SOV1_UI_getAccountsWithBalances_ not found.";
+         } catch (ex) { result = "Error executing DUMP_ACCOUNT_BALANCES: " + ex.message; }
+      } else if (cmd === 'CLEAN_ACCOUNTS_AUTOFIX') {
+         try {
+           result = (typeof CLEAN_ACCOUNTS_AUTOFIX_ === 'function') ? JSON.stringify(CLEAN_ACCOUNTS_AUTOFIX_()) : "Function CLEAN_ACCOUNTS_AUTOFIX_ not found.";
+         } catch (ex) { result = "Error executing CLEAN_ACCOUNTS_AUTOFIX: " + ex.message; }
+      } else if (cmd === 'RESET_ACCOUNTS_CANONICAL') {
+         try {
+           result = (typeof RESET_ACCOUNTS_CANONICAL_ === 'function') ? JSON.stringify(RESET_ACCOUNTS_CANONICAL_()) : "Function RESET_ACCOUNTS_CANONICAL_ not found.";
+         } catch (ex) { result = "Error executing RESET_ACCOUNTS_CANONICAL: " + ex.message; }
+      } else if (cmd === 'TEST_ADD_ACCOUNT') {
+         try {
+           var name = e.parameter.name || 'CLI Test Account';
+           var type = e.parameter.type || 'بنك';
+           var number = e.parameter.number || '';
+           var bank = e.parameter.bank || 'CLI Bank';
+           var balance = typeof e.parameter.balance !== 'undefined' ? Number(e.parameter.balance) : 0;
+           var isMine = (e.parameter.isMine === 'false') ? false : true;
+           var obj = { name: name, type: type, number: number, bank: bank, balance: balance, isMine: isMine, isInternal: false, aliases: '', notes: 'added via CLI test' };
+           result = (typeof SOV1_UI_addAccount_ === 'function') ? JSON.stringify(SOV1_UI_addAccount_(obj)) : "Function SOV1_UI_addAccount_ not found.";
+         } catch (ex) { result = "Error executing TEST_ADD_ACCOUNT: " + ex.message; }
+      } else if (cmd === 'BULK_EXTRACT_ACCOUNTS') {
+         try {
+           var raw = e.parameter.smsText ? decodeURIComponent(e.parameter.smsText) : '';
+           var lines = [];
+           // Try parsing as JSON array first (supports multi-line messages)
+           try {
+             var parsed = JSON.parse(raw);
+             if (Array.isArray(parsed)) lines = parsed;
+           } catch(eJson) {
+             // Fallback: Split by delimiter (try double newline first, else newline)
+             if (raw.indexOf('\n\n') !== -1) {
+                lines = raw.split(/\n\n/);
+             } else {
+                lines = raw.split(/\r?\n/);
+             }
+           }
+           // Clean empty lines
+           lines = lines.map(function(s){ return String(s).trim(); }).filter(function(s){ return s.length>0; });
+           
+           if (typeof SOV1_UI_bulkExtractAccounts === 'function') {
+             result = JSON.stringify(SOV1_UI_bulkExtractAccounts(lines));
+           } else {
+             result = 'Function SOV1_UI_bulkExtractAccounts not found.';
+           }
+         } catch (ex) { result = 'Error executing BULK_EXTRACT_ACCOUNTS: ' + ex.message; }
+      } else if (cmd === 'BULK_ADD_ACCOUNTS') {
+         try {
+           var json = e.parameter.accountsJson ? decodeURIComponent(e.parameter.accountsJson) : (e.parameter.accounts ? decodeURIComponent(e.parameter.accounts) : null);
+           var arr = [];
+           if (json) {
+             try { arr = JSON.parse(json); } catch (e) { arr = []; }
+           }
+           if (!arr || arr.length === 0) { result = JSON.stringify({ success: false, error: 'No accounts provided or parse failed' }); }
+           else if (typeof SOV1_UI_bulkAddAccounts === 'function') { result = JSON.stringify(SOV1_UI_bulkAddAccounts(arr)); }
+           else { result = 'Function SOV1_UI_bulkAddAccounts not found.'; }
+         } catch (ex) { result = 'Error executing BULK_ADD_ACCOUNTS: ' + ex.message; }
       } else if (cmd === 'LIST_CLI') {
          try {
-           var known = ['DEBUG_SHEETS_INFO','DEBUG_TELEGRAM_STATUS','RUN_MASTER_TESTS','RUN_AUTOMATED_CHECKLIST','ENSURE_ALL_SHEETS','CLEAN_CATEGORIES_SHEET','SETUP_BOT_COMMANDS','CLEAN_SYSTEM_SHEETS','RUN_MASTER_VERIFICATION','RUN_COMPLETE_SYSTEM_TEST','RUN_MANUAL_SETUP','SEND_TEST_TELEGRAM','DUMP_INGRESS_DEBUG'];
+           var known = ['DEBUG_SHEETS_INFO','DEBUG_TELEGRAM_STATUS','RUN_MASTER_TESTS','RUN_AUTOMATED_CHECKLIST','ENSURE_ALL_SHEETS','CLEAN_CATEGORIES_SHEET','SETUP_BOT_COMMANDS','CLEAN_SYSTEM_SHEETS','WIPE_ALL_DATA','RESTORE_DEFAULTS','CLEANUP_TX_CATEGORIES','REPAIR_TX_MERCHANTS','PARSE_AI','RUN_MASTER_VERIFICATION','RUN_COMPLETE_SYSTEM_TEST','RUN_MANUAL_SETUP','SEND_TEST_TELEGRAM','DUMP_INGRESS_DEBUG','DUMP_ACCOUNTS','DUMP_ACCOUNT_BALANCES','TEST_ADD_ACCOUNT','LIST_PROPERTIES','CLEAN_DUP_PROPERTIES','SET_MAINTENANCE_MODE','LIST_PROJECT_TRIGGERS','LIST_TRIGGERS'];
            var available = known.map(function(k){
              try { return { cmd: k, exists: (typeof eval(k) === 'function') }; } catch(e) { return { cmd: k, exists: false }; }
            });
@@ -123,6 +273,53 @@ function SOV1_UI_doGet_(e) {
          } catch (e) {
            result = "Error listing CLI: " + e.message;
          }
+      } else if (cmd === 'LIST_PROPERTIES') {
+         try {
+           var props = PropertiesService.getScriptProperties().getProperties();
+           result = JSON.stringify({ success: true, properties: props });
+         } catch (e) {
+           result = "Error listing properties: " + e.message;
+         }
+      } else if (cmd === 'CLEAN_DUP_PROPERTIES') {
+         try {
+           var props = PropertiesService.getScriptProperties();
+           var all = props.getProperties();
+           var keys = Object.keys(all);
+           var deleted = [];
+           keys.forEach(function(k) {
+             if (k.startsWith('dup:')) {
+               props.deleteProperty(k);
+               deleted.push(k);
+             }
+           });
+           result = JSON.stringify({ success: true, deleted: deleted });
+         } catch (e) {
+           result = "Error cleaning dup properties: " + e.message;
+         }
+      } else if (cmd === 'SET_SCRIPT_PROPERTY') {
+         try {
+           var key = e.parameter.key || e.parameter.k;
+           var val = (typeof e.parameter.value !== 'undefined') ? e.parameter.value : e.parameter.v || '';
+           if (!key) { result = JSON.stringify({ success: false, error: 'missing key' }); }
+           else { PropertiesService.getScriptProperties().setProperty(String(key), String(val)); result = JSON.stringify({ success: true, key: String(key) }); }
+         } catch (ex) { result = 'Error executing SET_SCRIPT_PROPERTY: ' + ex.message; }
+      } else if (cmd === 'SET_MAINTENANCE_MODE') {
+         try {
+           var mode = e.parameter.m_mode || 'off';
+           PropertiesService.getScriptProperties().setProperty('MAINTENANCE_MODE', mode);
+           result = JSON.stringify({ success: true, maintenance_mode: mode });
+         } catch (e) {
+           result = "Error setting maintenance mode: " + e.message;
+         }
+      } else if (cmd === 'LIST_PROJECT_TRIGGERS' || cmd === 'LIST_TRIGGERS') {
+         try {
+           result = (typeof LIST_PROJECT_TRIGGERS === 'function') ? JSON.stringify(LIST_PROJECT_TRIGGERS()) : "Function LIST_PROJECT_TRIGGERS not found.";
+         } catch (e) { result = "Error executing LIST_PROJECT_TRIGGERS: " + e.message; }
+      } else if (cmd === 'ENFORCE_TRIGGERS') {
+         try {
+           var keep = e.parameter.keep ? String(e.parameter.keep).split(',') : null;
+           result = (typeof SOV1_enforceTriggers_ === 'function') ? JSON.stringify(SOV1_enforceTriggers_(keep)) : "Function SOV1_enforceTriggers_ not found.";
+         } catch (e) { result = "Error executing ENFORCE_TRIGGERS: " + e.message; }
       } else {
         result = "Unknown command: " + cmd;
       }
@@ -131,6 +328,22 @@ function SOV1_UI_doGet_(e) {
     }
     return ContentService.createTextOutput(JSON.stringify({ result: result })).setMimeType(ContentService.MimeType.JSON);
   }
+
+  var page = (e && e.parameter && e.parameter.page) ? String(e.parameter.page) : 'index';
+  var file = 'index';
+  if (page === 'dashboard') file = 'Dashboard';
+  if (page === 'details') file = 'details';
+  if (page === 'reports') file = 'reports';
+  if (page === 'settings') file = 'settings';
+  if (page === 'test') file = 'test_report';
+  if (page === 'onboarding') file = 'onboarding';
+  if (page === 'features') file = 'features';
+  if (page === 'auto-tests') file = 'auto_tests';
+
+  return HtmlService.createHtmlOutputFromFile(file)
+    .setTitle('شافي المطيري — متابعة المصاريف المالية')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
 
 // --- CLI helpers: quick debug utilities (safe, read-only) ---
 function DEBUG_TELEGRAM_STATUS() {
@@ -180,21 +393,8 @@ function DUMP_INGRESS_DEBUG(n) {
   }
 }
 
-  var page = (e && e.parameter && e.parameter.page) ? String(e.parameter.page) : 'index';
-  var file = 'index';
-  if (page === 'dashboard') file = 'Dashboard';
-  if (page === 'details') file = 'details';
-  if (page === 'reports') file = 'reports';
-  if (page === 'settings') file = 'settings';
-  if (page === 'test') file = 'test_report';
-  if (page === 'onboarding') file = 'onboarding';
-  if (page === 'features') file = 'features';
-  if (page === 'auto-tests') file = 'auto_tests';
+// Moved logic up
 
-  return HtmlService.createHtmlOutputFromFile(file)
-    .setTitle('شافي المطيري — متابعة المصاريف المالية')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-}
 
 // --- حماية بسيطة (اختياري): كلمة مرور UI_PASSWORD ---
 function SOV1_UI_auth_(password) {
@@ -216,45 +416,110 @@ function SOV1_UI_getDashboard_(token) {
 
   var s1 = _sheet('Sheet1');
   var sB = _sheet('Budgets');
-  var sQ = _sheet('Ingress_Queue');
+  
+  // Handle missing Ingress_Queue sheet gracefully
+  var sQ = null;
+  try {
+    sQ = _sheet('Ingress_Queue');
+  } catch (e) {
+    Logger.log('Ingress_Queue sheet not found, skipping dup tracking');
+  }
 
   var now = new Date();
-  var startMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0,0,0);
-  var endMonth = new Date(now.getFullYear(), now.getMonth()+1, 1, 0,0,0);
+  
+  // ✅ Use salary day for monthly calculation
+  var salaryDay = 27; // Default
+  try {
+    var settings = getSettings();
+    if (settings && settings.settings && settings.settings.salary_day) {
+      salaryDay = Number(settings.settings.salary_day) || 27;
+    }
+  } catch (e) {}
+  
+  // Calculate month boundaries based on salary day
+  var startMonth, endMonth;
+  if (now.getDate() >= salaryDay) {
+    startMonth = new Date(now.getFullYear(), now.getMonth(), salaryDay, 0, 0, 0);
+    endMonth = new Date(now.getFullYear(), now.getMonth() + 1, salaryDay, 0, 0, 0);
+  } else {
+    startMonth = new Date(now.getFullYear(), now.getMonth() - 1, salaryDay, 0, 0, 0);
+    endMonth = new Date(now.getFullYear(), now.getMonth(), salaryDay, 0, 0, 0);
+  }
+  var prevStart = new Date(startMonth);
+  prevStart.setMonth(prevStart.getMonth() - 1);
+  var prevEnd = new Date(startMonth);
 
-  var b = sB.getDataRange().getValues();
   var totalRemain = 0;
-  for (var i=1;i<b.length;i++) totalRemain += Number(b[i][3]) || 0;
+  if (sB && sB.getLastRow() >= 2) {
+    var b = sB.getDataRange().getValues();
+    for (var i=1;i<b.length;i++) totalRemain += Number(b[i][3]) || 0;
+  }
+  
+  // ✅ Get total account balance
+  var totalAccountBalance = 0;
+  try {
+    if (typeof getAccountsWithBalances_ === 'function') {
+      var accounts = getAccountsWithBalances_();
+      for (var a = 0; a < accounts.length; a++) {
+        totalAccountBalance += Number(accounts[a].balance || 0);
+      }
+    }
+  } catch (e) {
+    Logger.log('Error getting account balances: ' + e);
+  }
 
   var last = s1.getLastRow();
   var rows = (last>=2) ? s1.getRange(2,1,last-1,13).getValues() : [];
-  var incomeM=0, spendM=0;
+  var incomeM=0, spendM=0, incomePrev=0;
 
   for (var r=0;r<rows.length;r++){
     var d = rows[r][1];
-    if (!(d instanceof Date) || d<startMonth || d>=endMonth) continue;
+    if (!(d instanceof Date)) continue;
     var amt = Number(rows[r][8]) || 0;
     var typ = String(rows[r][11]||'');
     var raw = String(rows[r][12]||'');
     var incoming = /(وارد|إيداع|استلام|راتب)/i.test(typ) || /(وارد|إيداع|استلام|راتب)/i.test(raw);
-    if (incoming) incomeM += Math.max(amt,0); else spendM += Math.max(amt,0);
+    if (d >= startMonth && d < endMonth) {
+      if (incoming) incomeM += Math.max(amt,0); else spendM += Math.max(amt,0);
+    } else if (d >= prevStart && d < prevEnd) {
+      if (incoming) incomePrev += Math.max(amt,0);
+    }
+  }
+  // Fallback: if no income transactions, use total account balances as current income baseline
+  if (incomeM === 0 && totalAccountBalance > 0) {
+    incomeM = totalAccountBalance;
   }
 
-  // تكرار آخر 7 أيام
-  var qLast = sQ.getLastRow();
-  var q = (qLast>=2) ? sQ.getRange(2,1,qLast-1,6).getValues() : [];
+  var incomeDeltaPct = (incomePrev > 0) ? ((incomeM - incomePrev) / incomePrev * 100) : null;
+
+  // تكرار آخر 7 أيام - only if Ingress_Queue exists
   var dupDaily = {};
-  var cutoff = new Date(Date.now() - 7*24*3600*1000);
-  for (var k=0;k<q.length;k++){
-    var t = q[k][0];
-    if (!(t instanceof Date) || t < cutoff) continue;
-    if (String(q[k][4]||'') !== 'SKIP_DUP') continue;
-    var day = Utilities.formatDate(t, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-    dupDaily[day] = (dupDaily[day]||0)+1;
+  if (sQ) {
+    try {
+      var qLast = sQ.getLastRow();
+      var q = (qLast>=2) ? sQ.getRange(2,1,qLast-1,6).getValues() : [];
+      var cutoff = new Date(Date.now() - 7*24*3600*1000);
+      for (var k=0;k<q.length;k++){
+        var t = q[k][0];
+        if (!(t instanceof Date) || t < cutoff) continue;
+        if (String(q[k][4]||'') !== 'SKIP_DUP') continue;
+        var day = Utilities.formatDate(t, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+        dupDaily[day] = (dupDaily[day]||0)+1;
+      }
+    } catch (e) {
+      Logger.log('Error reading Ingress_Queue: ' + e.message);
+    }
   }
 
   return {
-    kpi: { incomeM: incomeM, spendM: spendM, netM: incomeM-spendM, totalRemain: totalRemain },
+    kpi: { 
+      incomeM: incomeM, 
+      spendM: spendM, 
+      netM: incomeM - spendM, 
+      totalRemain: totalRemain,
+      totalBalance: totalAccountBalance,  // ✅ Total account balances
+      incomeDeltaPct: incomeDeltaPct
+    },
     dup7d: Object.keys(dupDaily).sort().map(function(d){ return { day:d, dup:dupDaily[d] }; })
   };
 }
@@ -270,15 +535,24 @@ function SOV1_UI_getLatest_(token, limit) {
   var rows = s1.getRange(start,1,last-start+1,13).getValues();
   rows.reverse();
 
+  var catMap = _getCategoryNameMap_();
+
   return rows.map(function(r, idx){
     var rowNumber = last - idx;
+    var rawCat = r[10] || '';
+    var displayCat = catMap[rawCat] || rawCat;
     return {
       row: rowNumber,
+      uuid: r[0] || '',
       date: (r[1] instanceof Date) ? Utilities.formatDate(r[1], Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss') : '',
       amount: Number(r[8]||0),
       merchant: r[9] || '',
-      category: r[10] || '',
-      type: r[11] || ''
+      category: displayCat,
+      type: r[11] || '',
+      account: r[6] || r[7] || '', // AccNum or CardNum
+      source: r[5] || '',
+      notes: r[12] || '',
+      tag: r[2] || ''
     };
   });
 }
@@ -299,15 +573,31 @@ function SOV1_UI_getCategories_(token) {
   // Try Categories sheet first, fallback to Budgets
   var sCat = _sheet('Categories');
   var cats = [];
-  
+
+  function _getCategoriesSchema_() {
+    if (!sCat || sCat.getLastRow() < 1) return null;
+    var header = sCat.getRange(1, 1, 1, sCat.getLastColumn()).getValues()[0].map(function(h){
+      return String(h || '').trim();
+    });
+    if (header[0] === 'Category ID' || header.indexOf('Category Name') >= 0) {
+      return { type: 'en', idCol: 1, nameCol: 2, parentCol: 3, typeCol: 4, iconCol: 5, colorCol: 6, descCol: 7, activeCol: 8 };
+    }
+    if (header[0] === 'التصنيف' || header.indexOf('الأيقونة') >= 0) {
+      return { type: 'ar', nameCol: 1, iconCol: 2, colorCol: 3, activeCol: 4, descCol: 5 };
+    }
+    return { type: 'ar', nameCol: 1, iconCol: 2, colorCol: 3, activeCol: 4, descCol: 5 };
+  }
+
   if (sCat && sCat.getLastRow() > 1) {
     // Categories sheet exists with data
-    var data = sCat.getRange(2, 1, sCat.getLastRow() - 1, 4).getValues();
+    var schema = _getCategoriesSchema_();
+    var data = sCat.getRange(2, 1, sCat.getLastRow() - 1, sCat.getLastColumn()).getValues();
     for (var i = 0; i < data.length; i++) {
-      var name = String(data[i][0] || '').trim();
-      var icon = String(data[i][1] || '').trim();
-      var active = String(data[i][3] || 'نعم').trim();
-      if (name && active !== 'لا') {
+      var name = String(data[i][schema.nameCol - 1] || '').trim();
+      var icon = String(data[i][(schema.iconCol || schema.nameCol) - 1] || '').trim();
+      var activeVal = data[i][(schema.activeCol || schema.nameCol) - 1];
+      var active = (activeVal === true) || (String(activeVal || '').trim().toLowerCase() === 'true') || (String(activeVal || '').trim() === 'نعم');
+      if (name && active) {
         cats.push({ name: name, icon: icon });
       }
     }
@@ -344,6 +634,45 @@ function SOV1_UI_getCategories_(token) {
   return cats;
 }
 
+// Map category IDs to display names (handles English/Arabic schemas)
+function _getCategoryNameMap_() {
+  try {
+    var sCat = _sheet('Categories');
+    if (!sCat || sCat.getLastRow() < 2) return {};
+
+    var header = sCat.getRange(1, 1, 1, sCat.getLastColumn()).getValues()[0].map(function(h){
+      return String(h || '').trim();
+    });
+    var isEnglishSchema = (header[0] === 'Category ID' || header.indexOf('Category Name') >= 0);
+    var data = sCat.getRange(2, 1, sCat.getLastRow() - 1, sCat.getLastColumn()).getValues();
+    var map = {};
+
+    for (var i = 0; i < data.length; i++) {
+      if (isEnglishSchema) {
+        var id = String(data[i][0] || '').trim();
+        var name = String(data[i][1] || '').trim();
+        var activeVal = data[i][7];
+        var active = (activeVal === true) || (String(activeVal || '').trim().toLowerCase() === 'true') || (String(activeVal || '').trim() === 'نعم');
+        if (name && active) {
+          if (id) map[id] = name;
+          map[name] = name;
+        }
+      } else {
+        var nm = String(data[i][0] || '').trim();
+        var activeAr = String(data[i][3] || 'نعم').trim();
+        if (nm && activeAr !== 'لا') {
+          map[nm] = nm;
+        }
+      }
+    }
+
+    return map;
+  } catch (e) {
+    Logger.log('Category map error: ' + e.message);
+    return {};
+  }
+}
+
 /**
  * Get all categories with full details for management
  */
@@ -352,40 +681,83 @@ function SOV1_UI_getCategoriesManage_(token) {
   
   var sCat = _sheet('Categories');
   if (!sCat || sCat.getLastRow() < 2) {
-    // Create Categories sheet if not exists
     SOV1_SETUP_CATEGORIES_SHEET_();
     sCat = _sheet('Categories');
   }
-  
-  var data = sCat.getRange(2, 1, Math.max(1, sCat.getLastRow() - 1), 5).getValues();
+
+  // Load Budgets Map
+  var budgetMap = {};
+  var sBud = _sheet('Budgets');
+  if (sBud && sBud.getLastRow() > 1) {
+    try {
+      var bData = sBud.getDataRange().getValues();
+      for (var j = 1; j < bData.length; j++) {
+        var bName = String(bData[j][0] || '').toLowerCase().trim();
+        var bLimit = Number(bData[j][1] || 0);
+        if (bName) budgetMap[bName] = bLimit;
+      }
+    } catch (e) { console.error('Budget load error', e); }
+  }
+
+  var header = sCat.getRange(1, 1, 1, sCat.getLastColumn()).getValues()[0].map(function(h){
+    return String(h || '').trim();
+  });
+  var isEnglishSchema = (header[0] === 'Category ID' || header.indexOf('Category Name') >= 0);
+  var data = sCat.getRange(2, 1, Math.max(1, sCat.getLastRow() - 1), sCat.getLastColumn()).getValues();
   var cats = [];
-  
+
   for (var i = 0; i < data.length; i++) {
-    var name = String(data[i][0] || '').trim();
-    if (name) {
-      cats.push({
-        row: i + 2,
-        name: name,
-        icon: String(data[i][1] || '').trim(),
-        color: String(data[i][2] || '').trim(),
-        active: String(data[i][3] || 'نعم').trim() !== 'لا',
-        notes: String(data[i][4] || '').trim()
-      });
+    var catObj = null;
+    if (isEnglishSchema) {
+      var id = String(data[i][0] || '').trim();
+      var nameEn = String(data[i][1] || '').trim();
+      if (nameEn) {
+        catObj = {
+          row: i + 2,
+          id: id,
+          name: nameEn,
+          icon: String(data[i][4] || '').trim(),
+          color: String(data[i][5] || '').trim(),
+          type: String(data[i][3] || '').trim(),
+          parent: String(data[i][2] || '').trim(),
+          active: (data[i][7] === true) || (String(data[i][7] || '').trim().toLowerCase() === 'true') || (String(data[i][7] || '').trim() === 'نعم'),
+          notes: String(data[i][6] || '').trim()
+        };
+      }
+    } else {
+      var name = String(data[i][0] || '').trim();
+      if (name) {
+        catObj = {
+          row: i + 2,
+          name: name,
+          icon: String(data[i][1] || '').trim(),
+          color: String(data[i][2] || '').trim(),
+          active: String(data[i][3] || 'نعم').trim() !== 'لا',
+          notes: String(data[i][4] || '').trim()
+        };
+      }
+    }
+
+    if (catObj) {
+      var bKey = catObj.name.toLowerCase().trim();
+      catObj.budgetLimit = budgetMap[bKey] || 0;
+      cats.push(catObj);
     }
   }
-  
+
   return cats;
 }
 
 /**
  * Add a new category
  */
-function SOV1_UI_addCategory_(token, name, icon, color) {
+function SOV1_UI_addCategory_(token, name, icon, color, description, budgetLimit) {
   if (!SOV1_UI_requireAuth_(token)) throw new Error('غير مصرح');
   
   name = String(name || '').trim();
   icon = String(icon || '📦').trim();
   color = String(color || '#6B7280').trim();
+  description = String(description || '').trim();
   
   if (!name) throw new Error('اسم التصنيف مطلوب');
   if (name.length > 50) throw new Error('اسم التصنيف طويل جداً');
@@ -400,17 +772,34 @@ function SOV1_UI_addCategory_(token, name, icon, color) {
     SOV1_SETUP_CATEGORIES_SHEET_();
     sCat = _sheet('Categories');
   }
+
+  var header = sCat.getRange(1, 1, 1, sCat.getLastColumn()).getValues()[0].map(function(h){
+    return String(h || '').trim();
+  });
+  var isEnglishSchema = (header[0] === 'Category ID' || header.indexOf('Category Name') >= 0);
+  var newId = name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_\-]/g, '');
+  if (!newId) newId = 'cat_' + Utilities.getUuid().slice(0, 8);
   
   // Check if exists
   var data = sCat.getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
-    if (String(data[i][0] || '').trim().toLowerCase() === name.toLowerCase()) {
+    var existingName = isEnglishSchema ? String(data[i][1] || '').trim() : String(data[i][0] || '').trim();
+    if (existingName.toLowerCase() === name.toLowerCase()) {
       throw new Error('التصنيف موجود مسبقاً');
     }
   }
-  
+
   // Add new row
-  sCat.appendRow([name, icon, color, 'نعم', '']);
+  if (isEnglishSchema) {
+    sCat.appendRow([newId, name, '', 'expense', icon, color, description, true]);
+  } else {
+    sCat.appendRow([name, icon, color, 'نعم', description]);
+  }
+
+  // Save Budget if provided
+  if (budgetLimit !== undefined && budgetLimit !== null && budgetLimit !== '') {
+    SOV1_UI_saveBudget_(name, budgetLimit);
+  }
   
   // Clear cache
   CacheService.getScriptCache().remove('UI_CATS');
@@ -421,7 +810,7 @@ function SOV1_UI_addCategory_(token, name, icon, color) {
 /**
  * Update an existing category
  */
-function SOV1_UI_updateCategory_(token, row, name, icon, color, active) {
+function SOV1_UI_updateCategory_(token, row, name, icon, color, active, description, budgetLimit) {
   if (!SOV1_UI_requireAuth_(token)) throw new Error('غير مصرح');
   
   row = Number(row || 0);
@@ -430,6 +819,7 @@ function SOV1_UI_updateCategory_(token, row, name, icon, color, active) {
   name = String(name || '').trim();
   icon = String(icon || '📦').trim();
   color = String(color || '#6B7280').trim();
+  description = String(description || '').trim();
   var activeStr = active === false ? 'لا' : 'نعم';
   
   if (!name) throw new Error('اسم التصنيف مطلوب');
@@ -440,7 +830,25 @@ function SOV1_UI_updateCategory_(token, row, name, icon, color, active) {
   }
   
   var sCat = _sheet('Categories');
-  sCat.getRange(row, 1, 1, 4).setValues([[name, icon, color, activeStr]]);
+  var header = sCat.getRange(1, 1, 1, sCat.getLastColumn()).getValues()[0].map(function(h){
+    return String(h || '').trim();
+  });
+  var isEnglishSchema = (header[0] === 'Category ID' || header.indexOf('Category Name') >= 0);
+
+  if (isEnglishSchema) {
+    sCat.getRange(row, 2).setValue(name);
+    sCat.getRange(row, 5).setValue(icon);
+    sCat.getRange(row, 6).setValue(color);
+    sCat.getRange(row, 7).setValue(description);
+    sCat.getRange(row, 8).setValue(active !== false);
+  } else {
+    sCat.getRange(row, 1, 1, 5).setValues([[name, icon, color, activeStr, description]]);
+  }
+
+  // Update Budget if provided
+  if (budgetLimit !== undefined && budgetLimit !== null && budgetLimit !== '') {
+    SOV1_UI_saveBudget_(name, budgetLimit);
+  }
   
   // Clear cache
   CacheService.getScriptCache().remove('UI_CATS');
@@ -458,7 +866,11 @@ function SOV1_UI_deleteCategory_(token, row) {
   if (row < 2) throw new Error('رقم الصف غير صحيح');
   
   var sCat = _sheet('Categories');
-  var name = String(sCat.getRange(row, 1).getValue() || '').trim();
+  var header = sCat.getRange(1, 1, 1, sCat.getLastColumn()).getValues()[0].map(function(h){
+    return String(h || '').trim();
+  });
+  var isEnglishSchema = (header[0] === 'Category ID' || header.indexOf('Category Name') >= 0);
+  var name = String(sCat.getRange(row, isEnglishSchema ? 2 : 1).getValue() || '').trim();
   
   // Don't delete system categories
   var systemCats = ['أخرى', 'راتب', 'تحويل', 'تحقق', 'مرفوضة'];
@@ -467,7 +879,11 @@ function SOV1_UI_deleteCategory_(token, row) {
   }
   
   // Mark as inactive instead of deleting
-  sCat.getRange(row, 4).setValue('لا');
+  if (isEnglishSchema) {
+    sCat.getRange(row, 8).setValue(false);
+  } else {
+    sCat.getRange(row, 4).setValue('لا');
+  }
   
   // Clear cache
   CacheService.getScriptCache().remove('UI_CATS');
@@ -479,6 +895,10 @@ function SOV1_UI_deleteCategory_(token, row) {
  * Setup Categories sheet with default data
  */
 function SOV1_SETUP_CATEGORIES_SHEET_() {
+  if (typeof ensureCategoriesSheet_ === 'function') {
+    return ensureCategoriesSheet_();
+  }
+
   var ss = SpreadsheetApp.openById(_prop_('SHEET_ID'));
   var existing = ss.getSheetByName('Categories');
   
@@ -488,7 +908,7 @@ function SOV1_SETUP_CATEGORIES_SHEET_() {
   
   var sheet = existing || ss.insertSheet('Categories');
   
-  // Headers
+  // Headers (fallback Arabic schema)
   var headers = ['التصنيف', 'الأيقونة', 'اللون', 'نشط', 'ملاحظات'];
   sheet.getRange(1, 1, 1, 5).setValues([headers]);
   sheet.getRange(1, 1, 1, 5)
@@ -506,6 +926,7 @@ function SOV1_SETUP_CATEGORIES_SHEET_() {
     ['ترفيه', '🎬', '#EC4899', 'نعم', 'سينما، اشتراكات'],
     ['صحة', '💊', '#06B6D4', 'نعم', 'طبيب، أدوية'],
     ['تعليم', '📚', '#6366F1', 'نعم', 'دورات، كتب'],
+    ['سحب نقدي', '🏧', '#64748B', 'نعم', 'سحب صراف، ATM'],
     ['راتب', '💰', '#22C55E', 'نعم', 'الراتب الشهري'],
     ['تحويل', '↔️', '#64748B', 'نعم', 'تحويلات بنكية'],
     ['أخرى', '📦', '#6B7280', 'نعم', 'مصروفات متنوعة']
@@ -578,6 +999,120 @@ function SOV1_CLEAN_TEST_CATEGORIES_() {
   return cleaned;
 }
 
+// Normalize English category names to Arabic (storage + display)
+function _normalizeCategoryNameArabic_(name) {
+  if (!name) return '';
+  var raw = String(name).trim();
+  if (/[\u0600-\u06FF]/.test(raw)) return raw; // Already Arabic
+
+  var key = raw.toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  var map = {
+    'food dining': 'طعام',
+    'food and dining': 'طعام',
+    'food': 'طعام',
+    'dining': 'طعام',
+    'groceries': 'مواد غذائية',
+    'restaurants': 'مطاعم ومقاهي',
+    'transportation': 'نقل',
+    'transport': 'نقل',
+    'shopping': 'تسوق',
+    'bills utilities': 'فواتير',
+    'bills and utilities': 'فواتير',
+    'utilities': 'فواتير',
+    'bills': 'فواتير',
+    'entertainment': 'ترفيه',
+    'healthcare': 'صحة',
+    'health': 'صحة',
+    'education': 'تعليم',
+    'family kids': 'عائلة وأطفال',
+    'family and kids': 'عائلة وأطفال',
+    'personal care': 'عناية شخصية',
+    'home garden': 'سكن',
+    'home and garden': 'سكن',
+    'installments': 'أقساط',
+    'charity donations': 'صدقة وتبرعات',
+    'charity and donations': 'صدقة وتبرعات',
+    'investment savings': 'استثمار وادخار',
+    'investment and savings': 'استثمار وادخار',
+    'work business': 'أعمال',
+    'work and business': 'أعمال',
+    'insurance': 'تأمين',
+    'transfers': 'تحويل',
+    'transfer': 'تحويل',
+    'other': 'أخرى',
+    'salary': 'راتب',
+    'income': 'دخل',
+    'fuel': 'وقود'
+  };
+
+  if (map[key]) return map[key];
+  if (map[raw.toLowerCase()]) return map[raw.toLowerCase()];
+  return raw;
+}
+
+function SOV1_UI_normalizeCategoriesToArabic_(token) {
+  if (!SOV1_UI_requireAuth_(token)) throw new Error('غير مصرح');
+  var result = { categories: 0, budgets: 0, transactions: 0 };
+
+  // 1) Categories sheet
+  var sCat = _sheet('Categories');
+  if (sCat && sCat.getLastRow() > 1) {
+    var header = sCat.getRange(1, 1, 1, sCat.getLastColumn()).getValues()[0].map(function(h){
+      return String(h || '').trim();
+    });
+    var isEnglishSchema = (header[0] === 'Category ID' || header.indexOf('Category Name') >= 0);
+    var nameCol = isEnglishSchema ? 2 : 1;
+    var rows = sCat.getRange(2, nameCol, sCat.getLastRow() - 1, 1).getValues();
+    for (var i = 0; i < rows.length; i++) {
+      var cur = String(rows[i][0] || '').trim();
+      if (!cur) continue;
+      var norm = _normalizeCategoryNameArabic_(cur);
+      if (norm && norm !== cur) {
+        sCat.getRange(i + 2, nameCol).setValue(norm);
+        result.categories++;
+      }
+    }
+  }
+
+  // 2) Budgets sheet
+  var sB = _sheet('Budgets');
+  if (sB && sB.getLastRow() > 1) {
+    var bRows = sB.getRange(2, 1, sB.getLastRow() - 1, 1).getValues();
+    for (var j = 0; j < bRows.length; j++) {
+      var bCur = String(bRows[j][0] || '').trim();
+      if (!bCur) continue;
+      var bNorm = _normalizeCategoryNameArabic_(bCur);
+      if (bNorm && bNorm !== bCur) {
+        sB.getRange(j + 2, 1).setValue(bNorm);
+        result.budgets++;
+      }
+    }
+  }
+
+  // 3) Transactions (Sheet1) column K = category
+  var s1 = _sheet('Sheet1');
+  if (s1 && s1.getLastRow() > 1) {
+    var tRows = s1.getRange(2, 11, s1.getLastRow() - 1, 1).getValues();
+    for (var k = 0; k < tRows.length; k++) {
+      var tCur = String(tRows[k][0] || '').trim();
+      if (!tCur) continue;
+      var tNorm = _normalizeCategoryNameArabic_(tCur);
+      if (tNorm && tNorm !== tCur) {
+        s1.getRange(k + 2, 11).setValue(tNorm);
+        result.transactions++;
+      }
+    }
+  }
+
+  CacheService.getScriptCache().remove('UI_CATS');
+  return result;
+}
+
 function SOV1_UI_changeCategory_(row, newCategory) {
   row = Number(row||0);
   newCategory = String(newCategory||'').trim();
@@ -646,15 +1181,32 @@ function SOV1_UI_getBudgets_(token) {
     var sB = _sheet('Budgets');
     var data = sB.getDataRange().getValues();
     var budgets = [];
+    var catMap = _getCategoryNameMap_();
+
+    function parseBudgetNumber_(v) {
+      if (typeof v === 'number') return v;
+      var s = String(v || '').trim();
+      if (typeof normalizeNumber_ === 'function') {
+        s = normalizeNumber_(s);
+      }
+      s = s.replace(/[^0-9.\-]/g, '');
+      var n = Number(s);
+      return isNaN(n) ? 0 : n;
+    }
     
     for (var i = 1; i < data.length; i++) {
       if (!data[i][0]) continue;
-      
+      var rawCat = String(data[i][0] || '');
+      var displayCat = catMap[rawCat] || rawCat;
+      var limitVal = parseBudgetNumber_(data[i][1]);
+      var spentVal = parseBudgetNumber_(data[i][2]);
+      // Always calculate remaining dynamically (ignore stale sheet value)
+      var remainingVal = limitVal - spentVal;
       budgets.push({
-        category: String(data[i][0] || ''),
-        limit: Number(data[i][1]) || 0,
-        spent: Number(data[i][2]) || 0,
-        remaining: Number(data[i][3]) || 0
+        category: displayCat,
+        limit: limitVal || 0,
+        spent: spentVal || 0,
+        remaining: remainingVal
       });
     }
     
@@ -976,7 +1528,7 @@ function SOV1_UI_getReportData_(token, period) {
     } else {
       // monthly - use salary day instead of calendar month
       var settings = getSettings();
-      var salaryDay = (settings && settings.settings && settings.settings.salary_day) || 1;
+      var salaryDay = (settings && settings.settings && settings.settings.salary_day) || 27;
       
       if (now.getDate() >= salaryDay) {
         // Past salary day this month
@@ -1002,8 +1554,20 @@ function SOV1_UI_getReportData_(token, period) {
       var raw = String(row[12] || '');
       
       if (date instanceof Date && date >= startDate) {
+        // ✅ Skip internal transfers - they don't affect net worth
+        var isInternalTransfer = /(حوالة داخلية|تحويل داخلي|internal)/i.test(category) || 
+                                  /(حوالة داخلية|تحويل داخلي|internal)/i.test(typ);
+        if (isInternalTransfer) continue;
+        
+        // ✅ Skip unknown/POS as categories (poorly parsed)
+        if (category === 'unknown' || category === 'POS') {
+          category = 'أخرى';
+        }
+        
         txCount++;
-        var isIncome = /(وارد|إيداع|استلام|راتب)/i.test(typ) || /(وارد|إيداع|استلام|راتب)/i.test(raw);
+        var isIncome = /(وارد|إيداع|استلام|راتب|income|deposit)/i.test(typ) || 
+                       /(وارد|إيداع|استلام|راتب|income|deposit)/i.test(category) ||
+                       /(وارد|إيداع|استلام|راتب)/i.test(raw);
         
         if (isIncome) {
           income += amount;
@@ -1042,11 +1606,99 @@ function SOV1_UI_getReportData_(token, period) {
  */
 function SOV1_UI_getAccounts_() {
   try {
-    return SOV1_UI_getAllAccounts_();
+    // Attempt to use Accounts.js logic if available
+    var idx = (typeof loadAccountsIndex_ === 'function') ? loadAccountsIndex_() : null;
+    if (idx && idx.byLast) {
+      // Reconstruct list from index
+      var list = [];
+      for (var k in idx.byLast) {
+        list.push(idx.byLast[k]);
+      }
+      return list;
+    }
+
+    // Fallback: Read directly
+    var s = _sheet('Accounts');
+    if (s.getLastRow() < 2) return [];
+    var data = s.getRange(2, 1, s.getLastRow()-1, 10).getValues();
+    return data.map(function(r){
+      return {
+        name: r[0], type: r[1], num: r[2], bank: r[3], 
+        balance: r[4], isMine: r[6], isInternal: r[7]
+      };
+    });
   } catch (e) {
     Logger.log('Error getting accounts: ' + e);
     return [];
   }
+}
+
+/**
+ * UI: Get dashboard stats (Income, Expense, Balance, Savings)
+ */
+function SOV1_UI_getStats_() {
+  var stats = { income: 0, expense: 0, balance: 0, savings: 0 };
+  try {
+    // 1. Balance
+    var accs = SOV1_UI_getAccounts_();
+    accs.forEach(function(a){ stats.balance += Number(a.balance)||0; });
+
+    // 2. Monthly Stats
+    var s1 = _sheet('Sheet1');
+    if (s1.getLastRow() > 1) {
+      var now = new Date();
+      var startM = new Date(now.getFullYear(), now.getMonth(), 1);
+      var data = s1.getRange(2, 1, s1.getLastRow()-1, 13).getValues();
+      
+      for(var i=0; i<data.length; i++) {
+        var d = new Date(data[i][1]);
+        if (d >= startM) {
+          var amt = Number(data[i][8])||0;
+          var type = String(data[i][11]||'').toLowerCase();
+          var cat = String(data[i][10]||'');
+          
+          if (cat.indexOf('حوالة داخلية')!==-1 || type.indexOf('تحويل')!==-1) continue;
+          
+          if (/income|دخل|إيداع/.test(type)) stats.income += amt;
+          else stats.expense += amt;
+        }
+      }
+      stats.savings = stats.income - stats.expense;
+    }
+  } catch (e) { Logger.log(e); }
+  return stats;
+}
+
+/**
+ * UI: Get recent transactions
+ */
+function SOV1_UI_getTransactions_() {
+  try {
+    var s1 = _sheet('Sheet1');
+    var lr = s1.getLastRow();
+    if (lr < 2) return [];
+    
+    var count = 50;
+    var start = Math.max(2, lr - count + 1);
+    var data = s1.getRange(start, 1, lr - start + 1, 13).getValues();
+    
+    // Sort DESC
+    data.sort(function(a,b){ return new Date(b[1]) - new Date(a[1]); });
+    
+    return data.map(function(r, idx) {
+      return {
+        uuid: r[0], date: r[1], amount: r[8], merchant: r[9],
+        category: r[10], type: r[11], notes: r[12], account: r[6]
+      };
+    });
+  } catch(e) { return []; }
+}
+
+/**
+ * UI: Get Report
+ */
+function SOV1_UI_getReport_(period) {
+  return SOV1_UI_getStats_(); // Simplified for now
 }
 
 /**
@@ -1097,22 +1749,157 @@ function SOV1_UI_getAccountsWithBalances() {
 }
 
 /**
- * Delete a transaction by row ID
+ * Delete a transaction by UUID (preferred) or row ID (fallback)
+ * @param {string|number} identifier - UUID string or row number
  */
-function SOV1_UI_deleteTransaction_(rowId) {
+function SOV1_UI_deleteTransaction_(identifier) {
   try {
-    if (!rowId || rowId < 2) {
-      return { error: 'Invalid row ID' };
+    if (!identifier) {
+      return { error: 'معرف غير صالح' };
     }
     
     var s1 = _sheet('Sheet1');
-    s1.deleteRow(rowId);
+    var rowToDelete = null;
     
-    Logger.log('Deleted transaction at row: ' + rowId);
-    return { success: true, message: 'Transaction deleted' };
+    // Check if identifier is a UUID (string) or row number
+    if (typeof identifier === 'string' && identifier.length > 4 && !/^\d+$/.test(identifier)) {
+      // It's a UUID - find the row
+      var data = s1.getDataRange().getValues();
+      for (var i = 1; i < data.length; i++) {
+        if (data[i][0] === identifier) { // UUID is in column A (index 0)
+          rowToDelete = i + 1; // +1 because sheet rows are 1-indexed
+          break;
+        }
+      }
+      if (!rowToDelete) {
+        return { error: 'لم يتم العثور على العملية بهذا المعرف: ' + identifier };
+      }
+    } else {
+      // It's a row number (legacy support)
+      rowToDelete = Number(identifier);
+      if (rowToDelete < 2) {
+        return { error: 'رقم صف غير صالح' };
+      }
+    }
+    
+    s1.deleteRow(rowToDelete);
+    
+    Logger.log('✅ Deleted transaction - identifier: ' + identifier + ', row: ' + rowToDelete);
+    return { success: true, message: 'تم حذف العملية بنجاح' };
   } catch (e) {
     Logger.log('Error deleting transaction: ' + e);
     return { error: e.message };
+  }
+}
+
+/**
+ * Update a transaction by UUID (preferred) or row ID (fallback)
+ * @param {string|number} identifier - UUID string or row number
+ * @param {object} newData - { amount, merchant, category, type, notes }
+ */
+function SOV1_UI_updateTransaction_(identifier, newData) {
+  try {
+    if (!identifier) {
+      return { success: false, error: 'معرف غير صالح' };
+    }
+    
+    var s1 = _sheet('Sheet1');
+    var rowToUpdate = null;
+    
+    // Check if identifier is a UUID (string) or row number
+    if (typeof identifier === 'string' && identifier.length > 4 && !/^\d+$/.test(identifier)) {
+      // It's a UUID - find the row
+      var data = s1.getDataRange().getValues();
+      for (var i = 1; i < data.length; i++) {
+        if (data[i][0] === identifier) { // UUID is in column A (index 0)
+          rowToUpdate = i + 1; // +1 because sheet rows are 1-indexed
+          break;
+        }
+      }
+      if (!rowToUpdate) {
+        return { success: false, error: 'لم يتم العثور على العملية بهذا المعرف: ' + identifier };
+      }
+    } else {
+      // It's a row number (legacy support)
+      rowToUpdate = Number(identifier);
+      if (rowToUpdate < 2) {
+        return { success: false, error: 'رقم صف غير صالح' };
+      }
+    }
+    
+    // SCHEMA: UUID[0], Date[1], Tag[2], Day[3], Week[4], Source[5], AccNum[6], CardNum[7], Amount[8], Merchant[9], Category[10], Type[11], Raw[12]
+    if (newData.amount !== undefined) s1.getRange(rowToUpdate, 9).setValue(Number(newData.amount) || 0);
+    if (newData.merchant !== undefined) s1.getRange(rowToUpdate, 10).setValue(String(newData.merchant || ''));
+    if (newData.category !== undefined) s1.getRange(rowToUpdate, 11).setValue(String(newData.category || ''));
+    if (newData.type !== undefined) s1.getRange(rowToUpdate, 12).setValue(String(newData.type || ''));
+    if (newData.notes !== undefined) s1.getRange(rowToUpdate, 13).setValue(String(newData.notes || ''));
+    if (newData.account !== undefined) s1.getRange(rowToUpdate, 7).setValue(String(newData.account || ''));
+    
+    Logger.log('✅ Updated transaction - identifier: ' + identifier + ', row: ' + rowToUpdate);
+    return { success: true, message: 'تم تحديث العملية بنجاح' };
+  } catch (e) {
+    Logger.log('Error updating transaction: ' + e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Get a single transaction by UUID (preferred) or row ID (fallback)
+ * @param {string|number} identifier - UUID string or row number
+ */
+function SOV1_UI_getTransaction_(identifier) {
+  try {
+    if (!identifier) {
+      return { success: false, error: 'معرف غير صالح' };
+    }
+    
+    var s1 = _sheet('Sheet1');
+    var row = null;
+    var rowNumber = null;
+    
+    // Check if identifier is a UUID (string) or row number
+    if (typeof identifier === 'string' && identifier.length > 4 && !/^\d+$/.test(identifier)) {
+      // It's a UUID - find the row
+      var data = s1.getDataRange().getValues();
+      for (var i = 1; i < data.length; i++) {
+        if (data[i][0] === identifier) {
+          row = data[i];
+          rowNumber = i + 1;
+          break;
+        }
+      }
+      if (!row) {
+        return { success: false, error: 'لم يتم العثور على العملية' };
+      }
+    } else {
+      // It's a row number (legacy support)
+      rowNumber = Number(identifier);
+      if (rowNumber < 2) {
+        return { success: false, error: 'رقم صف غير صالح' };
+      }
+      var r = s1.getRange(rowNumber, 1, 1, 13).getValues()[0];
+      row = r;
+    }
+    
+    // SCHEMA: UUID[0], Date[1], Tag[2], Day[3], Week[4], Source[5], AccNum[6], CardNum[7], Amount[8], Merchant[9], Category[10], Type[11], Raw[12]
+    return {
+      success: true,
+      transaction: {
+        uuid: row[0] || '',
+        row: rowNumber,
+        date: row[1],
+        amount: Number(row[8] || 0),
+        merchant: row[9] || '',
+        category: row[10] || '',
+        type: row[11] || '',
+        account: row[6] || row[7] || '',
+        notes: row[12] || '',
+        source: row[5] || ''
+      }
+    };
+  } catch (e) {
+    Logger.log('Error getting transaction: ' + e);
+    return { success: false, error: e.message };
   }
 }
 
@@ -1199,6 +1986,10 @@ function SOV1_UI_getReport(period) {
 
 function SOV1_UI_getAccounts() {
   try {
+    // Use the comprehensive function from Accounts.js if available
+    if (typeof SOV1_UI_getAllAccounts_ === 'function') {
+      return SOV1_UI_getAllAccounts_();
+    }
     return SOV1_UI_getAccounts_();
   } catch (e) {
     Logger.log('Error in SOV1_UI_getAccounts: ' + e);
@@ -1215,11 +2006,66 @@ function SOV1_UI_addManualTransaction(txData) {
   }
 }
 
-function SOV1_UI_deleteTransaction(rowId) {
+function SOV1_UI_createTransaction(data) {
   try {
-    return SOV1_UI_deleteTransaction_(rowId);
+    if (typeof SOV1_UI_createTransaction_ === 'function') {
+      return SOV1_UI_createTransaction_(data);
+    } else {
+      return { success: false, error: 'Function SOV1_UI_createTransaction_ not found' };
+    }
   } catch (e) {
-    Logger.log('Error in SOV1_UI_deleteTransaction: ' + e);
+    Logger.log('Error in SOV1_UI_createTransaction: ' + e);
+    return { success: false, error: e.message };
+  }
+}
+
+function SOV1_UI_parseWithAI(text) {
+  try {
+    if (!text || !text.trim()) return { success: false, error: 'النص فارغ' };
+    
+    // Use the hybrid classifier (now with Grok support)
+    if (typeof classifyWithAI === 'function') {
+      var result = classifyWithAI(text);
+      return { success: true, result: result };
+    } else if (typeof callAiHybridV120 === 'function') {
+      var result = callAiHybridV120(text);
+      return { success: true, result: result };
+    } else {
+      return { success: false, error: 'AI engine not available' };
+    }
+  } catch (e) {
+    Logger.log('Error in SOV1_UI_parseWithAI: ' + e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Bulk ingest SMS messages using the AI pipeline
+ * @param {Array} texts - array of raw SMS messages
+ */
+function SOV1_UI_bulkIngestSMS(texts) {
+  try {
+    if (!texts || !Array.isArray(texts) || texts.length === 0) {
+      return { success: false, error: 'لا توجد رسائل' };
+    }
+
+    var added = 0;
+    var errors = [];
+
+    for (var i = 0; i < texts.length; i++) {
+      var t = String(texts[i] || '').trim();
+      if (!t) continue;
+      try {
+        var result = processTransaction(t, 'BULK_UI');
+        if (result && result.uuid) added++;
+        else errors.push({ index: i, error: 'فشل الإدخال' });
+      } catch (eTx) {
+        errors.push({ index: i, error: eTx.message });
+      }
+    }
+
+    return { success: errors.length === 0, added: added, total: texts.length, errors: errors };
+  } catch (e) {
     return { success: false, error: e.message };
   }
 }
@@ -1305,6 +2151,24 @@ function SOV1_UI_extractAccountFromSMS(smsText) {
     return { success: false, error: e.message };
   }
 }
+
+function SOV1_UI_bulkExtractAccounts(smsArray) {
+  try {
+    return SOV1_UI_bulkExtractAccounts_(smsArray);
+  } catch (e) {
+    Logger.log('Error in SOV1_UI_bulkExtractAccounts: ' + e);
+    return { success: false, error: e.message };
+  }
+}
+
+function SOV1_UI_bulkAddAccounts(accounts) {
+  try {
+    return SOV1_UI_bulkAddAccounts_(accounts);
+  } catch (e) {
+    Logger.log('Error in SOV1_UI_bulkAddAccounts: ' + e);
+    return { success: false, error: e.message };
+  }
+} 
 
 function SOV1_UI_updateBudget(category, newLimit) {
   try {
@@ -1423,6 +2287,126 @@ function SOV1_UI_deleteAllData() {
   }
 }
 
+/**
+ * Wipe everything (transactions, budgets, accounts, transfers, categories)
+ */
+function SOV1_UI_wipeAllData() {
+  try {
+    return SOV1_UI_resetData_('OPEN', ['transactions', 'budgets', 'accounts', 'transfers', 'categories'], 'CONFIRM_RESET');
+  } catch (e) {
+    Logger.log('Error wiping all data: ' + e);
+    return {
+      success: false,
+      error: 'فشل حذف كل البيانات: ' + e.message
+    };
+  }
+}
+
+/**
+ * Restore default Categories, Budgets (aligned), and Accounts
+ */
+function SOV1_UI_restoreDefaults() {
+  try {
+    var ss = _ss();
+
+    // 1) Categories
+    if (typeof SOV1_SETUP_CATEGORIES_SHEET_ === 'function') {
+      SOV1_SETUP_CATEGORIES_SHEET_();
+    }
+
+    // 2) Budgets aligned to Categories (limit=0, spent=0)
+    var sBudgets = ss.getSheetByName('Budgets');
+    if (!sBudgets) {
+      sBudgets = ss.insertSheet('Budgets');
+      sBudgets.appendRow(['Category', 'Budgeted', 'Spent', 'Remaining', '% Used', 'Alert Threshold', 'Status']);
+      sBudgets.setFrozenRows(1);
+    }
+
+    var sCat = ss.getSheetByName('Categories');
+    var catNames = [];
+    if (sCat && sCat.getLastRow() > 1) {
+      var catData = sCat.getRange(2, 1, sCat.getLastRow() - 1, 1).getValues();
+      catNames = catData.map(function(r){ return String(r[0] || '').trim(); }).filter(function(n){ return n.length > 0; });
+    }
+
+    // If categories still empty, seed defaults directly
+    if (!sCat || catNames.length === 0) {
+      sCat = sCat || ss.insertSheet('Categories');
+      if (sCat.getLastRow() === 0) {
+        sCat.appendRow(['التصنيف', 'الأيقونة', 'اللون', 'نشط', 'ملاحظات']);
+        sCat.setFrozenRows(1);
+        sCat.setRightToLeft(true);
+      }
+
+      var defaults = [
+        ['طعام', '🍽️', '#EF4444', 'نعم', 'مطاعم، كافيهات، بقالة'],
+        ['نقل', '🚗', '#F59E0B', 'نعم', 'وقود، أوبر، مواصلات'],
+        ['فواتير', '📄', '#3B82F6', 'نعم', 'كهرباء، ماء، اتصالات'],
+        ['تسوق', '🛍️', '#8B5CF6', 'نعم', 'ملابس، إلكترونيات'],
+        ['سكن', '🏠', '#10B981', 'نعم', 'إيجار، صيانة'],
+        ['ترفيه', '🎬', '#EC4899', 'نعم', 'سينما، اشتراكات'],
+        ['صحة', '💊', '#06B6D4', 'نعم', 'طبيب، أدوية'],
+        ['تعليم', '📚', '#6366F1', 'نعم', 'دورات، كتب'],
+        ['سحب نقدي', '🏧', '#64748B', 'نعم', 'سحب صراف، ATM'],
+        ['راتب', '💰', '#22C55E', 'نعم', 'الراتب الشهري'],
+        ['تحويل', '↔️', '#64748B', 'نعم', 'تحويلات بنكية'],
+        ['أخرى', '📦', '#6B7280', 'نعم', 'مصروفات متنوعة']
+      ];
+
+      var startRow = sCat.getLastRow() + 1;
+      sCat.getRange(startRow, 1, defaults.length, 5).setValues(defaults);
+
+      catNames = defaults.map(function(r){ return r[0]; });
+    }
+
+    // Clear existing budgets rows
+    if (sBudgets.getLastRow() > 1) {
+      sBudgets.deleteRows(2, sBudgets.getLastRow() - 1);
+    }
+
+    var budgetRows = catNames.map(function(name){
+      return [name, 0, 0, 0, 0, 80, ''];
+    });
+    if (budgetRows.length > 0) {
+      sBudgets.getRange(2, 1, budgetRows.length, 7).setValues(budgetRows);
+    }
+
+    // 3) Accounts (restore your 7 accounts with zero balance)
+    var sAcc = ss.getSheetByName('Accounts');
+    if (!sAcc) {
+      sAcc = ss.insertSheet('Accounts');
+      sAcc.appendRow(['الاسم','النوع','الرقم','البنك','الرصيد','آخر_تحديث','حسابي','تحويل_داخلي','أسماء_بديلة','ملاحظات']);
+      sAcc.setFrozenRows(1);
+    }
+
+    if (sAcc.getLastRow() > 1) {
+      sAcc.deleteRows(2, sAcc.getLastRow() - 1);
+    }
+
+    var now = new Date();
+    var accounts = [
+      ['SAIB', 'بنك', '8001', 'SAIB', 0, now, 'true', 'true', 'SAIB, SAIB-8001', 'restored'],
+      ['STC Bank', 'بنك', '1929', 'STC Bank', 0, now, 'true', 'true', 'STC Bank, STC-1929', 'restored'],
+      ['Tiqmo', 'محفظة', '9682', 'Tiqmo', 0, now, 'true', 'true', 'Tiqmo, Tiqmo-9682', 'restored'],
+      ['D360', 'بنك', '3449', 'D360', 0, now, 'true', 'true', 'D360, D360-3449', 'restored'],
+      ['الراجحي-9767', 'بنك', '9767', 'Alrajhi', 0, now, 'true', 'true', 'Alrajhi-9767, Alrajhi', 'restored'],
+      ['الراجحي-9765', 'بنك', '9765', 'Alrajhi', 0, now, 'true', 'true', 'Alrajhi-9765, Alrajhi', 'restored'],
+      ['الراجحي-1626', 'بنك', '1626', 'Alrajhi', 0, now, 'true', 'true', 'Alrajhi-1626, Alrajhi', 'restored']
+    ];
+    sAcc.getRange(2, 1, accounts.length, 10).setValues(accounts);
+
+    // Clear caches
+    CacheService.getScriptCache().remove('ACCOUNTS_INDEX_V2');
+    CacheService.getScriptCache().remove('SJA_DASH_DATA');
+    CacheService.getScriptCache().remove('UI_CATS');
+
+    return { success: true, categories: catNames.length, budgets: budgetRows.length, accounts: accounts.length };
+  } catch (e) {
+    Logger.log('Restore defaults error: ' + e);
+    return { success: false, error: e.message };
+  }
+}
+
 // Legacy alias - keep for backward compatibility with old frontend calls
 function SOV1_UI_deleteUserAccount() {
   return SOV1_UI_deleteAllData();
@@ -1503,8 +2487,8 @@ function SOV1_UI_getAllDashboardData(token) {
     }
     
     try {
-      debugLog.push('🏦 Fetching accounts with balances...');
-      accounts = SOV1_UI_getAccountsWithBalances_();
+      debugLog.push('🏦 Fetching accounts...');
+      accounts = (typeof SOV1_UI_getAllAccounts_ === 'function') ? SOV1_UI_getAllAccounts_() : SOV1_UI_getAccountsWithBalances_();
       debugLog.push('✅ Accounts fetched: ' + (accounts ? accounts.length : 0));
     } catch (e) {
       debugLog.push('⚠️ Accounts error: ' + e.message);
@@ -2223,9 +3207,9 @@ function SOV1_UI_getCategoriesManage(token) {
 /**
  * Add new category
  */
-function SOV1_UI_addCategory(token, name, icon, color) {
+function SOV1_UI_addCategory(token, name, icon, color, description, budgetLimit) {
   try {
-    return SOV1_UI_addCategory_(token, name, icon, color);
+    return SOV1_UI_addCategory_(token, name, icon, color, description, budgetLimit);
   } catch (e) {
     Logger.log('Error in SOV1_UI_addCategory: ' + e);
     return { success: false, error: e.message };
@@ -2235,9 +3219,9 @@ function SOV1_UI_addCategory(token, name, icon, color) {
 /**
  * Update category
  */
-function SOV1_UI_updateCategory(token, row, name, icon, color, active) {
+function SOV1_UI_updateCategory(token, row, name, icon, color, active, description, budgetLimit) {
   try {
-    return SOV1_UI_updateCategory_(token, row, name, icon, color, active);
+    return SOV1_UI_updateCategory_(token, row, name, icon, color, active, description, budgetLimit);
   } catch (e) {
     Logger.log('Error in SOV1_UI_updateCategory: ' + e);
     return { success: false, error: e.message };
@@ -2277,6 +3261,85 @@ function SOV1_UI_cleanupCategories(token) {
     };
   } catch (e) {
     Logger.log('Error in SOV1_UI_cleanupCategories: ' + e);
+    return { success: false, error: e.message };
+  }
+}
+
+// ============================================================================
+// MISSING PUBLIC WRAPPERS - Added for frontend compatibility
+// ============================================================================
+
+/**
+ * Public wrapper for getting categories (for index.html)
+ */
+function SOV1_UI_getCategories(token) {
+  try {
+    return SOV1_UI_getCategories_(token || 'OPEN');
+  } catch (e) {
+    Logger.log('Error in SOV1_UI_getCategories: ' + e);
+    return [];
+  }
+}
+
+/**
+ * Public wrapper for normalize categories to Arabic
+ */
+function SOV1_UI_normalizeCategoriesToArabic(token) {
+  try {
+    return SOV1_UI_normalizeCategoriesToArabic_(token || 'OPEN');
+  } catch (e) {
+    Logger.log('Error in SOV1_UI_normalizeCategoriesToArabic: ' + e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Public wrapper for get reset options
+ */
+function SOV1_UI_getResetOptions() {
+  try {
+    return SOV1_UI_getResetOptions_();
+  } catch (e) {
+    Logger.log('Error in SOV1_UI_getResetOptions: ' + e);
+    return [];
+  }
+}
+
+/**
+ * Public wrapper for reset data
+ */
+function SOV1_UI_resetData(token, types, confirmation) {
+  try {
+    return SOV1_UI_resetData_(token || 'OPEN', types, confirmation);
+  } catch (e) {
+    Logger.log('Error in SOV1_UI_resetData: ' + e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Public wrapper for delete transaction (uses UUID)
+ */
+function SOV1_UI_deleteTransaction(identifier) {
+  try {
+    return SOV1_UI_deleteTransaction_(identifier);
+  } catch (e) {
+    Logger.log('Error in SOV1_UI_deleteTransaction: ' + e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Public wrapper for clean test categories
+ */
+function SOV1_CLEAN_TEST_CATEGORIES() {
+  try {
+    if (typeof SOV1_CLEAN_TEST_CATEGORIES_ === 'function') {
+      return SOV1_CLEAN_TEST_CATEGORIES_();
+    }
+    return { success: false, error: 'Function not available' };
+  } catch (e) {
+    Logger.log('Error in SOV1_CLEAN_TEST_CATEGORIES: ' + e);
     return { success: false, error: e.message };
   }
 }

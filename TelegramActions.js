@@ -275,7 +275,7 @@ function SOV1_handleCallback_(cb) {
       // الميزانيات
       if (action === 'budgets' || data === 'budgets') {
         if (typeof sendBudgetsSnapshotToTelegram_ === 'function') {
-          sendBudgetsSnapshotToTelegram_();
+          sendBudgetsSnapshotToTelegram_(chatId);
         } else {
           SOV1_TG_api_('sendMessage', { chat_id: chatId, text: '⚠️ وظيفة الميزانيات غير متاحة حالياً.' });
         }

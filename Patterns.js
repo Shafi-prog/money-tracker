@@ -745,13 +745,13 @@ function EXTRACT_ALL_ACCOUNTS() {
     var lastRow = s1.getLastRow();
     
     if (lastRow > 1) {
-      // Get account numbers from column L (accNum) and card from column K (cardNum)
-      var accData = s1.getRange(2, 11, lastRow - 1, 2).getValues(); // K:L
+      // Correct columns: AccNum (col 7), CardNum (col 8), Raw (col 13)
+      var accCardData = s1.getRange(2, 7, lastRow - 1, 2).getValues(); // cols G:H -> AccNum, CardNum
       var rawData = s1.getRange(2, 13, lastRow - 1, 1).getValues(); // M (raw SMS)
       
-      accData.forEach(function(row, idx) {
-        var cardNum = String(row[0] || '').trim();
-        var accNum = String(row[1] || '').trim();
+      accCardData.forEach(function(row, idx) {
+        var accNum = String(row[0] || '').trim();
+        var cardNum = String(row[1] || '').trim();
         var rawSMS = String(rawData[idx][0] || '');
         
         if (cardNum && cardNum.length >= 4) {
@@ -869,14 +869,18 @@ function ADD_DISCOVERED_ACCOUNTS_TO_SHEET() {
     accounts.forEach(function(acc) {
       if (existingNumbers.indexOf(acc.number) === -1 && existingNumbers.indexOf(acc.fullNumber) === -1) {
         var name = (acc.bank || 'Unknown') + ' ' + acc.number;
+        // Append full 10-column row to match Accounts schema
         sh.appendRow([
-          name,           // Name
-          acc.type,       // Type
-          acc.number,     // Number (last 4)
-          acc.bank || '', // Bank
-          '',             // Aliases
-          true,           // Is Mine
-          false           // Is Internal
+          name,                  // Name
+          acc.type || 'حساب',    // Type
+          acc.number || '',      // Number (last 4)
+          acc.bank || '',        // Bank
+          0,                     // Balance
+          new Date(),            // LastUpdate
+          'true',                // isMine
+          'false',               // isInternal
+          '',                    // Aliases
+          'Discovered'           // Notes
         ]);
         added++;
         Logger.log('✅ Added: ' + name);

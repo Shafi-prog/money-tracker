@@ -357,7 +357,16 @@
           <span x-show="!formStates.isCleaning">🧹 تنظيف التصنيفات التجريبية</span>
           <span x-show="formStates.isCleaning">⏳ جاري التنظيف...</span>
         </button>
+        <button 
+          @click="normalizeCategoriesToArabic()"
+          :disabled="formStates.isNormalizing"
+          class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-50 ml-2"
+        >
+          <span x-show="!formStates.isNormalizing">🌍 توحيد التصنيفات للعربية</span>
+          <span x-show="formStates.isNormalizing">⏳ جاري التوحيد...</span>
+        </button>
         <p class="text-sm text-gray-500 mt-2">إزالة التصنيفات التي تحتوي على كلمات مثل: test, تجريب, fake</p>
+        <p class="text-sm text-gray-500 mt-1">تحويل التصنيفات الإنجليزية إلى أسماء عربية في التصنيفات والميزانيات والمعاملات</p>
       </div>
     </div>
 
@@ -413,6 +422,27 @@
             </div>
           </div>
 
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">الميزانية الشهرية (اختياري)</label>
+            <input 
+              type="number" 
+              x-model="categoryForm.budgetLimit"
+              class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              placeholder="0.00"
+            >
+            <p class="text-xs text-gray-500 mt-1">تحديد حد للصرف الشهري لهذا التصنيف</p>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">الوصف (اختياري)</label>
+            <textarea 
+              x-model="categoryForm.description"
+              rows="2"
+              class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              placeholder="وصف التصنيف..."
+            ></textarea>
+          </div>
+
           <div class="flex items-center gap-3" x-show="showEditCategoryModal">
             <input type="checkbox" x-model="categoryForm.active" id="catActive" class="w-4 h-4">
             <label for="catActive" class="text-sm text-gray-700">تصنيف نشط</label>
@@ -458,6 +488,18 @@
               placeholder="مثال: الراجحي، المحفظة"
             >
           </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">النوع</label>
+            <select 
+              x-model="accountForm.type"
+              class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="بنك">بنك</option>
+              <option value="بطاقة">بطاقة</option>
+              <option value="محفظة">محفظة إلكترونية</option>
+            </select>
+          </div>
           
           <div class="grid grid-cols-2 gap-4">
             <div>
@@ -492,9 +534,34 @@
             >
           </div>
 
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">أسماء بديلة (مفصولة بفاصلة)</label>
+            <input 
+              type="text" 
+              x-model="accountForm.aliases"
+              class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              placeholder="الراجحي,alrajhi,alrajhi bank"
+            >
+          </div>
+
           <div class="flex items-center gap-3">
             <input type="checkbox" x-model="accountForm.isMine" id="accMine" class="w-4 h-4">
             <label for="accMine" class="text-sm text-gray-700">حساب شخصي (يظهر في تقاريري)</label>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <input type="checkbox" x-model="accountForm.isInternal" id="accInternal" class="w-4 h-4">
+            <label for="accInternal" class="text-sm text-gray-700">تحويل داخلي</label>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">ملاحظات</label>
+            <textarea 
+              x-model="accountForm.notes"
+              rows="2"
+              class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              placeholder="ملاحظات إضافية عن الحساب"
+            ></textarea>
           </div>
         </div>
         
@@ -620,7 +687,8 @@
       return {
         settings: {
           user_name: '',
-          default_currency: 'USD',
+          user_email: '',
+          default_currency: 'SAR',
           language: 'ar',
           salary_day: 1,
           enable_notifications: true,
@@ -634,12 +702,16 @@
         showAddAccountModal: false,
         showEditAccountModal: false,
         accountForm: {
-          row: null, 
-          name: '', 
-          number: '', 
+          row: null,
+          name: '',
+          type: 'بنك',
+          number: '',
           bank: '',
           balance: 0,
-          isMine: true
+          isMine: true,
+          isInternal: false,
+          aliases: '',
+          notes: ''
         },
 
         // Categories management
@@ -652,7 +724,9 @@
           name: '',
           icon: '📦',
           color: '#6B7280',
-          active: true
+          active: true,
+          budgetLimit: '',
+          description: ''
         },
         availableIcons: ['🍽️', '🚗', '📄', '🛍️', '🏠', '🎬', '💊', '📚', '💰', '↔️', '📦', '💳', '🎮', '✈️', '💪', '🎁', '☕', '🛒', '🏥', '📱'],
         availableColors: ['#EF4444', '#F59E0B', '#10B981', '#3B82F6', '#8B5CF6', '#EC4899', '#06B6D4', '#6366F1', '#22C55E', '#64748B', '#6B7280', '#1F2937'],
@@ -674,6 +748,7 @@
           isSavingCategory: false,
           isSavingAccount: false,
           isCleaning: false,
+          isNormalizing: false,
           isResetting: false
         },
 
@@ -706,10 +781,14 @@
           this.accountForm = {
             row: acc.id || acc.row,
             name: acc.name,
+            type: acc.type || 'بنك',
             number: acc.number || '',
             bank: acc.bank || '',
             balance: Number(acc.balance || 0),
-            isMine: acc.isMine !== false
+            isMine: acc.isMine !== false,
+            isInternal: acc.isInternal === true || acc.isInternal === 'true',
+            aliases: acc.aliases || '',
+            notes: acc.notes || ''
           };
           this.showEditAccountModal = true;
         },
@@ -760,14 +839,14 @@
               })
               .SOV1_UI_updateAccount(this.accountForm.row, {
                 name: this.accountForm.name,
-                type: 'بنك',
+                type: this.accountForm.type || 'بنك',
                 number: this.accountForm.number,
                 bank: this.accountForm.bank,
                 balance: this.accountForm.balance,
                 isMine: this.accountForm.isMine,
-                isInternal: false,
-                aliases: '',
-                notes: ''
+                isInternal: this.accountForm.isInternal,
+                aliases: this.accountForm.aliases || '',
+                notes: this.accountForm.notes || ''
               });
           } else {
             // Add
@@ -788,14 +867,14 @@
               })
               .SOV1_UI_addAccount({
                 name: this.accountForm.name,
-                type: 'بنك',
+                type: this.accountForm.type || 'بنك',
                 number: this.accountForm.number,
                 bank: this.accountForm.bank,
                 balance: this.accountForm.balance,
                 isMine: this.accountForm.isMine,
-                isInternal: false,
-                aliases: '',
-                notes: ''
+                isInternal: this.accountForm.isInternal,
+                aliases: this.accountForm.aliases || '',
+                notes: this.accountForm.notes || ''
               });
           }
         },
@@ -805,8 +884,8 @@
           this.showEditCategoryModal = false;
           this.showAddAccountModal = false;
           this.showEditAccountModal = false;
-          this.categoryForm = { row: null, name: '', icon: '📦', color: '#6B7280', active: true };
-          this.accountForm = { row: null, name: '', number: '', bank: '', balance: 0, isMine: true };
+          this.categoryForm = { row: null, name: '', icon: '📦', color: '#6B7280', active: true, budgetLimit: '', description: '' };
+          this.accountForm = { row: null, name: '', type: 'بنك', number: '', bank: '', balance: 0, isMine: true, isInternal: false, aliases: '', notes: '' };
         },
 
         loadSettings() {
@@ -833,15 +912,9 @@
 
         loadResetOptions() {
           if (typeof google === 'undefined' || !google.script || !google.script.run) {
-            // Demo data for standalone mode
-            this.resetStats = { transactions: 150, budgets: 12, accounts: 5, transfers: 8, categories: 20 };
-            this.resetOptions = [
-              { id: 'transactions', label: 'المعاملات', icon: '💳', count: 150 },
-              { id: 'budgets', label: 'الميزانيات', icon: '📊', count: 12 },
-              { id: 'accounts', label: 'الحسابات', icon: '🏦', count: 5 },
-              { id: 'transfers', label: 'التحويلات', icon: '↔️', count: 8 },
-              { id: 'categories', label: 'التصنيفات', icon: '🏷️', count: 20 }
-            ];
+            // No demo data in standalone mode
+            this.resetStats = { transactions: 0, budgets: 0, accounts: 0, transfers: 0, categories: 0 };
+            this.resetOptions = [];
             return;
           }
           
@@ -855,7 +928,7 @@
             .withFailureHandler((error) => {
               console.error('Load reset options error:', error);
             })
-            .SOV1_UI_getResetOptions_();
+            .SOV1_UI_getResetOptions();
         },
 
         toggleResetOption(id) {
@@ -918,7 +991,7 @@
               this.notifications.error.show = true;
               this.notifications.error.text = 'خطأ: ' + error.message;
             })
-            .SOV1_UI_resetData_('OPEN', this.selectedResets, this.resetConfirmation);
+            .SOV1_UI_resetData('OPEN', this.selectedResets, this.resetConfirmation);
         },
 
         loadCategories() {
@@ -939,7 +1012,7 @@
               this.categoriesLoading = false;
               console.error('Categories load error:', error);
             })
-            .SOV1_UI_getCategoriesManage_('OPEN');
+            .SOV1_UI_getCategoriesManage('OPEN');
         },
 
         saveSettings() {
@@ -981,7 +1054,9 @@
             name: cat.name,
             icon: cat.icon || '📦',
             color: cat.color || '#6B7280',
-            active: cat.active !== false
+            active: cat.active !== false,
+            budgetLimit: cat.budgetLimit || '',
+            description: cat.description || ''
           };
           this.showEditCategoryModal = true;
         },
@@ -1004,7 +1079,7 @@
               this.notifications.error.show = true;
               this.notifications.error.text = 'خطأ: ' + error.message;
             })
-            .SOV1_UI_deleteCategory_('OPEN', cat.row);
+            .SOV1_UI_deleteCategory('OPEN', cat.row);
         },
 
         saveCategory() {
@@ -1023,7 +1098,7 @@
                 if (result && result.ok) {
                   this.closeModals();
                   this.notifications.success.show = true;
-                  this.notifications.success.text = 'تم تحديث التصنيف';
+                  this.notifications.success.text = 'تم تحديث التصنيف والميزانية';
                   setTimeout(() => { this.notifications.success.show = false; }, 3000);
                   this.loadCategories();
                 }
@@ -1032,7 +1107,7 @@
                 this.formStates.isSavingCategory = false;
                 alert('خطأ: ' + error.message);
               })
-              .SOV1_UI_updateCategory_('OPEN', this.categoryForm.row, this.categoryForm.name, this.categoryForm.icon, this.categoryForm.color, this.categoryForm.active);
+              .SOV1_UI_updateCategory('OPEN', this.categoryForm.row, this.categoryForm.name, this.categoryForm.icon, this.categoryForm.color, this.categoryForm.active, this.categoryForm.description, this.categoryForm.budgetLimit);
           } else {
             // Add new
             google.script.run
@@ -1050,7 +1125,7 @@
                 this.formStates.isSavingCategory = false;
                 alert('خطأ: ' + error.message);
               })
-              .SOV1_UI_addCategory_('OPEN', this.categoryForm.name, this.categoryForm.icon, this.categoryForm.color);
+              .SOV1_UI_addCategory('OPEN', this.categoryForm.name, this.categoryForm.icon, this.categoryForm.color, this.categoryForm.description, this.categoryForm.budgetLimit);
           }
         },
 
@@ -1074,7 +1149,30 @@
               this.notifications.error.show = true;
               this.notifications.error.text = 'خطأ في التنظيف: ' + error.message;
             })
-            .SOV1_CLEAN_TEST_CATEGORIES_();
+            .SOV1_CLEAN_TEST_CATEGORIES();
+        },
+
+        normalizeCategoriesToArabic() {
+          if (!confirm('هل تريد توحيد التصنيفات إلى العربية؟\nسيتم تعديل التصنيفات والميزانيات والمعاملات المكتوبة بالإنجليزية.')) {
+            return;
+          }
+
+          this.formStates.isNormalizing = true;
+
+          google.script.run
+            .withSuccessHandler((result) => {
+              this.formStates.isNormalizing = false;
+              this.notifications.success.show = true;
+              this.notifications.success.text = 'تم التوحيد: ' + (result.categories || 0) + ' تصنيف، ' + (result.budgets || 0) + ' ميزانية، ' + (result.transactions || 0) + ' عملية';
+              setTimeout(() => { this.notifications.success.show = false; }, 5000);
+              this.loadCategories();
+            })
+            .withFailureHandler((error) => {
+              this.formStates.isNormalizing = false;
+              this.notifications.error.show = true;
+              this.notifications.error.text = 'خطأ في التوحيد: ' + error.message;
+            })
+            .SOV1_UI_normalizeCategoriesToArabic('OPEN');
         },
 
         closeModals() {

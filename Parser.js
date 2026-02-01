@@ -75,11 +75,30 @@ function parseSmsDate_(text) {
 }
 
 /**
+ * Extract Available Balance from SMS
+ */
+function extractBalance_(text) {
+  var t = String(text || '').replace(/\s+/g, ' ');
+  // Pattern: "Available Balance SAR 123.45" or "الرصيد 123.45"
+  var m = t.match(/(?:Available Balance|Balance|الرصيد|رصيد)(?:\s*:)?\s*(?:SAR|ر\.س|ريال)?\s*(\d[\d,\.]*)/i);
+  if (m) {
+    return Number(m[1].replace(/,/g, ''));
+  }
+  return null;
+}
+
+/**
  * Detect bank name from SMS sender or content
  */
 function detectBank_(text, senderInfo) {
   var t = (text + ' ' + (senderInfo || '')).toLowerCase();
   
+  // High Priority / Digital Banks
+  if (/D360|d360/i.test(t)) return 'D360';
+  if (/Tiqmo|تيقمو|tgmo/i.test(t)) return 'Tiqmo';
+  if (/stc\s*bank|بنك\s*stc|بنك\s*الاتصالات/i.test(t)) return 'STC Bank';
+  if (/saib|البنك\s*السعودي\s*للاستثمار/i.test(t)) return 'SAIB';
+
   // Saudi Banks
   if (/alrajhi|الراجحي|مصرف الراجحي|al-rajhi/i.test(t)) return 'الراجحي';
   if (/alinma|الإنماء|مصرف الإنماء/i.test(t)) return 'الإنماء';
@@ -185,6 +204,7 @@ function callAiHybridEnhanced(text, context) {
   var smsDate = parseSmsDate_(text);
   var bank = detectBank_(text, context.sender);
   var accounts = identifyAccounts_(text, knownAccounts);
+  var extractedBalance = extractBalance_(text);
   
   // Get base AI result
   var ai = classifyWithAI(text);
@@ -196,6 +216,10 @@ function callAiHybridEnhanced(text, context) {
   ai.merchantAccount = accounts.merchantAccount;
   ai.userCard = accounts.userCard || ai.cardNum;
   ai.merchantCard = accounts.merchantCard;
+  
+  if (extractedBalance !== null) {
+      ai.currentBalance = extractedBalance;
+  }
   
   // Apply classifier with enhanced data
   ai = applyClassifierMap_(text, ai);

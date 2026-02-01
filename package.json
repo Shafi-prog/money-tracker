@@ -16,7 +16,8 @@
     "versions": "clasp versions",
     "setup": "npm install && clasp login",
     "auto-push": "node scripts/auto-push.js",
-    "test": "clasp run AUTO_TEST_ALL_PAGES"
+    "test": "clasp run AUTO_TEST_ALL_PAGES",
+    "postdeploy": "powershell -ExecutionPolicy Bypass -File scripts/post-deploy.ps1"
   },
   "keywords": [
     "google-apps-script",

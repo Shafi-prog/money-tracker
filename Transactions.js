@@ -1,6 +1,8 @@
 ﻿/**
  * TRANSACTION_MANAGEMENT.js - Complete Transaction CRUD
  * Provides edit and enhanced delete functionality
+ * Synced with Flow.js schema: 
+ * [UUID, Date, Tag, Day, Week, Source, AccNum, CardNum, Amount, Merchant, Category, Type, Notes]
  */
 
 /**
@@ -20,17 +22,71 @@ function SOV1_UI_getTransaction_(rowId) {
       success: true,
       transaction: {
         rowId: rowId,
-        date: data[0],
-        uuid: data[1],
-        merchant: data[2],
-        category: data[3],
-        amount: data[7],
-        type: data[10],
-        notes: data[12]
+        date: data[1],      // Index 1: Date
+        uuid: data[0],      // Index 0: UUID
+        merchant: data[9],  // Index 9: Merchant
+        category: data[10], // Index 10: Category
+        amount: data[8],    // Index 8: Amount
+        type: data[11],     // Index 11: Type
+        notes: data[12]     // Index 12: Notes/Raw
       }
     };
   } catch (e) {
     Logger.log('Error getting transaction: ' + e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Create new transaction directly (bypassing text parsing)
+ */
+function SOV1_UI_createTransaction_(data) {
+  try {
+    if (!data.amount) throw new Error('المبلغ مطلوب');
+    
+    var s1 = _sheet('Sheet1');
+    
+    var now = new Date();
+    var uuid = (typeof generateShortUUID_ === 'function') ? generateShortUUID_() : 'WEB-' + Date.now();
+    var dateVal = data.date ? new Date(data.date) : now;
+    
+    var amount = Math.abs(Number(data.amount));
+    var type = data.type || 'expense';
+    var merchant = data.merchant || 'غير محدد';
+    var categoryRaw = data.category || 'أخرى';
+    var category = normalizeCategoryForBudget_(categoryRaw);
+    var notes = data.notes || '';
+    var account = data.account || 'نقدي';
+    
+    // Schema: [UUID, Date, Tag, Day, Week, Source, AccNum, CardNum, Amount, Merchant, Category, Type, Raw]
+    s1.appendRow([
+      uuid,
+      dateVal,
+      'WEB_UI', // Tag
+      'اليوم', // Placeholder for day formula
+      'الأسبوع', // Placeholder for week formula
+      'Web',    // Source
+      account,  // AccNum/Account Name
+      '',       // CardNum
+      amount,
+      merchant,
+      category,
+      type,
+      notes
+    ]);
+    
+    // Update Budget Logic
+    var isIncoming = (type === 'income' || type === 'دخل');
+    var isInternal = isInternalTransferForBudget_(categoryRaw, type);
+    
+    if (!isInternal) {
+      applyBudgetAmount_(category, isIncoming ? -amount : amount);
+    }
+    
+    return { success: true, message: 'تم إضافة العملية بنجاح' };
+    
+  } catch (e) {
+    Logger.log('Error creating transaction: ' + e);
     return { success: false, error: e.message };
   }
 }
@@ -50,45 +106,52 @@ function SOV1_UI_updateTransaction_(rowId, newData) {
       return { success: false, error: 'العملية غير موجودة' };
     }
     
-    // Get current data
-    var currentRow = sheet.getRange(rowId, 1, 1, 13).getValues()[0];
+    var currentRange = sheet.getRange(rowId, 1, 1, 13);
+    var currentRow = currentRange.getValues()[0];
+    
+    var oldCategoryRaw = currentRow[10]; // Index 10
+    var oldCategory = normalizeCategoryForBudget_(oldCategoryRaw);
+    var oldAmount = Number(currentRow[8]) || 0; // Index 8
+    var oldType = currentRow[11]; // Index 11
     
     // Update fields if provided
-    if (newData.merchant !== undefined) {
-      sheet.getRange(rowId, 3).setValue(newData.merchant);
-    }
+    var changes = {};
+    if (newData.merchant !== undefined) changes[10] = newData.merchant; // Col 10
+    if (newData.category !== undefined) changes[11] = newData.category; // Col 11
+    if (newData.amount !== undefined) changes[9] = Number(newData.amount); // Col 9
+    if (newData.notes !== undefined) changes[13] = newData.notes; // Col 13
+    if (newData.type !== undefined) changes[12] = newData.type; // Col 12
     
-    if (newData.category !== undefined) {
-      sheet.getRange(rowId, 4).setValue(newData.category);
-      
-      // Update budget if category changed
-      var oldCategory = currentRow[3];
-      var oldAmount = Number(currentRow[7]) || 0;
-      
-      if (oldCategory && oldCategory !== newData.category) {
-        // Reverse old budget
-        reverseBudgetAmount_(oldCategory, oldAmount);
-        // Apply to new budget
-        applyBudgetAmount_(newData.category, oldAmount);
-      }
-    }
+    // Apply changes
+    Object.keys(changes).forEach(function(col) {
+      sheet.getRange(rowId, parseInt(col)).setValue(changes[col]);
+    });
+
+    // Budget Update Logic
+    var categoryChanged = (newData.category !== undefined && newData.category !== oldCategoryRaw);
+    var amountChanged = (newData.amount !== undefined && Number(newData.amount) !== oldAmount);
+    var typeChanged = (newData.type !== undefined && newData.type !== oldType);
     
-    if (newData.amount !== undefined) {
-      var newAmount = Number(newData.amount);
-      var oldAmount = Number(currentRow[7]) || 0;
-      var category = currentRow[3];
-      
-      sheet.getRange(rowId, 8).setValue(newAmount);
-      
-      // Update budget with difference
-      if (category) {
-        var diff = newAmount - oldAmount;
-        applyBudgetAmount_(category, diff);
-      }
-    }
-    
-    if (newData.notes !== undefined) {
-      sheet.getRange(rowId, 13).setValue(newData.notes);
+    if (categoryChanged || amountChanged || typeChanged) {
+       // Reverse old (only if not internal transfer)
+       var oldIsInternal = isInternalTransferForBudget_(oldCategoryRaw, oldType);
+       if (!oldIsInternal) {
+         var oldIsIncoming = (oldType === 'income' || oldType === 'دخل');
+         var oldDelta = oldIsIncoming ? -oldAmount : oldAmount;
+         applyBudgetAmount_(oldCategory, -oldDelta);
+       }
+       
+       // Apply new (only if not internal transfer)
+       var newCategoryRaw = (newData.category !== undefined) ? newData.category : oldCategoryRaw;
+       var newCategory = normalizeCategoryForBudget_(newCategoryRaw);
+       var newAmount = (newData.amount !== undefined) ? Number(newData.amount) : oldAmount;
+       var newType = (newData.type !== undefined) ? newData.type : oldType;
+       var newIsInternal = isInternalTransferForBudget_(newCategoryRaw, newType);
+       if (!newIsInternal) {
+         var newIsIncoming = (newType === 'income' || newType === 'دخل');
+         var newDelta = newIsIncoming ? -newAmount : newAmount;
+         applyBudgetAmount_(newCategory, newDelta);
+       }
     }
     
     return { success: true, message: 'تم تحديث العملية بنجاح' };
@@ -98,97 +161,117 @@ function SOV1_UI_updateTransaction_(rowId, newData) {
   }
 }
 
-/**
- * Delete transaction by row ID
- */
 function SOV1_UI_deleteTransaction_(rowId) {
-  try {
-    if (!rowId || rowId < 2) {
+   try {
+    var sheet = _sheet('Sheet1');
+    var maxRows = sheet.getLastRow();
+     
+    if (!rowId || rowId < 2 || rowId > maxRows) {
       return { success: false, error: 'معرف غير صالح' };
     }
+     
+    var currentRow = sheet.getRange(rowId, 1, 1, 13).getValues()[0];
+    var categoryRaw = currentRow[10]; // Index 10
+    var amount = Number(currentRow[8]) || 0; // Index 8
+    var type = currentRow[11]; // Index 11
     
-    var sheet = _sheet('Sheet1');
-    
-    if (rowId > sheet.getLastRow()) {
-      return { success: false, error: 'العملية غير موجودة' };
+    var isInternal = isInternalTransferForBudget_(categoryRaw, type);
+    if (!isInternal) {
+      var category = normalizeCategoryForBudget_(categoryRaw);
+      var isIncoming = (type === 'income' || type === 'دخل');
+      var delta = isIncoming ? -amount : amount;
+      applyBudgetAmount_(category, -delta);
     }
-    
-    // Get transaction data before deleting
-    var data = sheet.getRange(rowId, 1, 1, 13).getValues()[0];
-    var category = data[3];
-    var amount = Number(data[7]) || 0;
-    var type = String(data[10] || '');
-    var isIncoming = /(وارد|إيداع|استلام|راتب)/i.test(type);
-    
-    // Reverse budget entry
-    if (category && !isIncoming) {
-      reverseBudgetAmount_(category, amount);
-    }
-    
-    // Delete row
+     
     sheet.deleteRow(rowId);
-    
-    return { success: true, message: 'تم حذف العملية بنجاح' };
-  } catch (e) {
-    Logger.log('Error deleting transaction: ' + e);
-    return { success: false, error: e.message };
-  }
+    return { success: true, message: 'تم حذف العملية' };
+   } catch(e) {
+     return { success: false, error: e.message };
+   }
 }
 
-/**
- * Helper: Apply amount to budget
- */
 function applyBudgetAmount_(category, amount) {
-  try {
-    var ss = _ss();
-    var budgetSheet = ss.getSheetByName('Budgets');
-    
-    if (!budgetSheet) return;
-    
-    var data = budgetSheet.getDataRange().getValues();
-    
-    for (var i = 1; i < data.length; i++) {
-      if (String(data[i][0]).toLowerCase() === String(category).toLowerCase()) {
-        var currentSpent = Number(data[i][2]) || 0;
-        var newSpent = currentSpent + amount;
-        budgetSheet.getRange(i + 1, 3).setValue(newSpent);
-        
-        // Update remaining
-        var budgeted = Number(data[i][1]) || 0;
-        budgetSheet.getRange(i + 1, 4).setValue(budgeted - newSpent);
-        break;
+    try {
+      var sB = _sheet('Budgets');
+      if (!sB) return;
+
+      var data = sB.getDataRange().getValues();
+      for (var i = 1; i < data.length; i++) {
+        if (String(data[i][0]||'').trim().toLowerCase() === String(category).trim().toLowerCase()) {
+          var currentSpent = Number(data[i][2]) || 0;
+          var newSpent = currentSpent + amount;
+          sB.getRange(i + 1, 3).setValue(newSpent);      
+          break;
+        }
       }
-    }
-  } catch (e) {
-    Logger.log('Error applying budget amount: ' + e);
-  }
+    } catch (e) { Logger.log(e); }
+}
+
+function normalizeCategoryForBudget_(category) {
+  var c = String(category || '').trim();
+  if (!c) return 'أخرى';
+  var lc = c.toLowerCase();
+  if (lc === 'pos' || lc === 'unknown') return 'أخرى';
+  return c;
+}
+
+function isInternalTransferForBudget_(category, type) {
+  var cat = String(category || '');
+  var typ = String(type || '');
+  return /(حوالة داخلية|تحويل داخلي|internal)/i.test(cat) ||
+         /(حوالة داخلية|تحويل داخلي|internal)/i.test(typ) ||
+         typ.toLowerCase() === 'transfer';
+}
+
+function reverseBudgetAmount_(category, amount) {
+    applyBudgetAmount_(category, -amount);
 }
 
 /**
- * Helper: Reverse budget amount (for deletions/edits)
+ * Remove test transactions for a specific year only
+ * Matches: test, تجريب, تجربة, dummy, fake in Merchant/Category/Raw
+ * @param {number} year - target year (e.g., 2025). Defaults to current year.
  */
-function reverseBudgetAmount_(category, amount) {
+function SOV1_CLEAN_TEST_TRANSACTIONS_BY_YEAR_(year) {
   try {
-    var ss = _ss();
-    var budgetSheet = ss.getSheetByName('Budgets');
-    
-    if (!budgetSheet) return;
-    
-    var data = budgetSheet.getDataRange().getValues();
-    
-    for (var i = 1; i < data.length; i++) {
-      if (String(data[i][0]).toLowerCase() === String(category).toLowerCase()) {
-        var currentSpent = Number(data[i][2]) || 0;
-        var newSpent = Math.max(0, currentSpent - amount);
-        budgetSheet.getRange(i + 1, 3).setValue(newSpent);
-        
-        // Update remaining
-        var budgeted = Number(data[i][1]) || 0;
-        budgetSheet.getRange(i + 1, 4).setValue(budgeted - newSpent);
-        break;
+    var targetYear = Number(year) || new Date().getFullYear();
+    var sheet = _sheet('Sheet1');
+    if (!sheet || sheet.getLastRow() < 2) return { success: true, removed: 0, year: targetYear };
+
+    var lastRow = sheet.getLastRow();
+    var data = sheet.getRange(2, 1, lastRow - 1, 13).getValues();
+    var toDelete = [];
+
+    for (var i = 0; i < data.length; i++) {
+      var row = data[i];
+      var dateVal = row[1]; // Date column
+      if (!(dateVal instanceof Date)) continue;
+      if (dateVal.getFullYear() !== targetYear) continue;
+
+      var merchant = String(row[9] || '');
+      var category = String(row[10] || '');
+      var raw = String(row[12] || '');
+      var hay = (merchant + ' ' + category + ' ' + raw).toLowerCase();
+
+      if (/\btest\b|تجريب|تجربة|dummy|fake/i.test(hay)) {
+        // Budget reversal
+        var amount = Number(row[8]) || 0;
+        var type = String(row[11] || '');
+        var isIncoming = (type === 'income' || type === 'دخل');
+        var delta = isIncoming ? -amount : amount;
+        applyBudgetAmount_(category, -delta);
+
+        toDelete.push(i + 2);
       }
     }
+
+    toDelete.sort(function(a, b) { return b - a; }).forEach(function(r) {
+      sheet.deleteRow(r);
+    });
+
+    return { success: true, removed: toDelete.length, year: targetYear };
   } catch (e) {
-    Logger.log('Error reversing budget amount: ' + e);
+    Logger.log('Error cleaning test transactions: ' + e);
+    return { success: false, error: e.message };
   }
 }

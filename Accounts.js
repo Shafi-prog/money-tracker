@@ -78,10 +78,34 @@ function loadAccountsIndex_() {
 
 function classifyAccountFromText_(text, cardLast) {
   var idx = loadAccountsIndex_();
-  var t = String(text || '').toLowerCase();
+  var t = String(text || '').toLowerCase().replace(/\s+/g, ' ').trim();
 
+  // 1. Match by card last digits
   if (cardLast && idx.byLast[cardLast]) return { hit: idx.byLast[cardLast], isInternal: !!idx.byLast[cardLast].isInternal };
 
+  // 2. Match by account number
+  var accNumMatch = t.match(/(\d{4})/); // Extract 4-digit account number
+  if (accNumMatch && idx.byLast[accNumMatch[1]]) {
+    return { hit: idx.byLast[accNumMatch[1]], isInternal: !!idx.byLast[accNumMatch[1]].isInternal };
+  }
+
+  // 3. Match by account name or bank (exact/partial match)
+  var accountKeys = Object.keys(idx.byLast);
+  for (var j = 0; j < accountKeys.length; j++) {
+    var acc = idx.byLast[accountKeys[j]];
+    var accNameLower = (acc.name || '').toLowerCase();
+    var accBankLower = (acc.bank || '').toLowerCase();
+    
+    // Check if text contains account name or bank name
+    if (accNameLower && t.indexOf(accNameLower) >= 0) {
+      return { hit: acc, isInternal: !!acc.isInternal };
+    }
+    if (accBankLower && t.indexOf(accBankLower) >= 0) {
+      return { hit: acc, isInternal: !!acc.isInternal };
+    }
+  }
+
+  // 4. Match by aliases
   var keys = Object.keys(idx.byAlias);
   for (var i = 0; i < keys.length; i++) {
     if (t.indexOf(keys[i]) >= 0) return { hit: idx.byAlias[keys[i]], isInternal: !!idx.byAlias[keys[i]].isInternal };
@@ -112,22 +136,33 @@ function SETUP_MY_ACCOUNTS() {
   
   // Name, Type, Number, Bank, Balance, LastUpdate, isMine, isInternal, Aliases, Notes
   var myAccounts = [
-    // 🏦 SAIB - ساب
-    ['ساب - رئيسي', 'بنك', '8001', 'ساب', 0, new Date(), 'TRUE', 'FALSE', 'SAIB,البنك السعودي البريطاني,saib', 'الحساب الرئيسي'],
-    ['ساب - مدى', 'بطاقة', '3474', 'ساب', 0, new Date(), 'TRUE', 'FALSE', '*3474,مدى ابل,mada', 'بطاقة الصراف'],
-    
-    // 🏦 الراجحي
-    ['الراجحي - رئيسي', 'بنك', '9767', 'الراجحي', 0, new Date(), 'TRUE', 'FALSE', 'الراجحي,alrajhi,alrajhibank', 'حوالات'],
-    ['الراجحي - بطاقة', 'بطاقة', '3449', 'الراجحي', 0, new Date(), 'TRUE', 'FALSE', '9767,X9767', 'بطاقة الراجحي'],
-    ['الراجحي - فيزا', 'بطاقة', '4495', 'الراجحي', 0, new Date(), 'TRUE', 'FALSE', 'platinum,فيزا', 'بطاقة فيزا'],
+    // ════════════════════════════════════════════════════════════════════════════════
+    // 1. SAIB (1 Account + 1 Card) -> Single Entity
+    // ════════════════════════════════════════════════════════════════════════════════
+    ['SAIB', 'بنك', '8001', 'SAIB', 0, new Date(), 'TRUE', 'FALSE', 'SAIB,saib,البنك السعودي للاستثمار,*3474,3474', 'الحساب الرئيسي + بطاقة 3474'],
 
-    // 📱 Wallets
-    ['STC Pay', 'محفظة', '', 'STC Pay', 0, new Date(), 'TRUE', 'TRUE', 'stc pay,stcpay,إس تي سي', 'محفظة رقمية'],
-    ['tiqmo', 'محفظة', '3281', 'tiqmo', 0, new Date(), 'TRUE', 'TRUE', 'tiqmo,تيقمو,TGMO', 'محفظة رقمية'],
-    ['urpay', 'محفظة', '', 'urpay', 0, new Date(), 'TRUE', 'TRUE', 'urpay,يوربي', 'محفظة رقمية'],
+    // ════════════════════════════════════════════════════════════════════════════════
+    // 2. STC Bank (1 Account + 2 Cards) -> Single Entity
+    // ════════════════════════════════════════════════════════════════════════════════
+    ['STC Bank', 'بنك', '1929', 'STC Bank', 0, new Date(), 'TRUE', 'FALSE', 'STC Bank,STC,stc pay,*3281,3281,*4495,4495', 'حساب 1929 + بطاقات (3281, 4495)'],
 
-    // 💳 Credit Services
-    ['Tamara', 'ائتمان', 'tamara', 'Tamara', 0, new Date(), 'TRUE', 'FALSE', 'Tamara,تمارا', 'اشتر الآن ادفع لاحقاً'],
+    // ════════════════════════════════════════════════════════════════════════════════
+    // 3. Tiqmo (1 Account + 1 Card) -> Single Entity
+    // ════════════════════════════════════════════════════════════════════════════════
+    ['Tiqmo', 'بنك', '9682', 'Tiqmo', 0, new Date(), 'TRUE', 'FALSE', 'Tiqmo,tiqmo,تيقمو,*0305,0305', 'حساب 9682 + بطاقة 0305'],
+
+    // ════════════════════════════════════════════════════════════════════════════════
+    // 4. D360 (1 Account + 1 Card) -> Single Entity
+    // ════════════════════════════════════════════════════════════════════════════════
+    // Note: User provided Card 3449 only. Treating as the main identifier.
+    ['D360', 'بنك', '3449', 'D360', 0, new Date(), 'TRUE', 'FALSE', 'D360,d360,دي 360', 'حساب/بطاقة 3449'],
+
+    // ════════════════════════════════════════════════════════════════════════════════
+    // 5, 6, 7. Alrajhi (3 Separate Accounts)
+    // ════════════════════════════════════════════════════════════════════════════════
+    ['الراجحي - 9767', 'بنك', '9767', 'Alrajhi', 0, new Date(), 'TRUE', 'FALSE', 'الراجحي,Alrajhi,ALBI', 'حوالات (محمد الحربي)'],
+    ['الراجحي - 9765', 'بنك', '9765', 'Alrajhi', 0, new Date(), 'TRUE', 'FALSE', 'الراجحي,Alrajhi', 'إيداعات (ابتسام)'],
+    ['الراجحي - 1626', 'بنك', '1626', 'Alrajhi', 0, new Date(), 'TRUE', 'FALSE', 'الراجحي,Alrajhi', 'حوالات داخلية (جهز)']
   ];
   
   myAccounts.forEach(function(acc) {
@@ -222,10 +257,58 @@ function SOV1_UI_addAccount_(accountData) {
     
     // Clear cache
     CacheService.getScriptCache().remove('ACCOUNTS_INDEX_V2');
+    CacheService.getScriptCache().remove('SJA_DASH_DATA');
+
+    // Log event for observability
+    try { if (typeof logIngressEvent_ === 'function') logIngressEvent_('INFO', 'SOV1_UI_addAccount_', { name: accountData.name, number: accountData.number || '', bank: accountData.bank || '' }, 'account added'); } catch (e) {}
     
-    return { success: true, message: 'تم إضافة الحساب بنجاح' };
+    return { success: true, ok: true, message: 'تم إضافة الحساب بنجاح' };
   } catch (e) {
     Logger.log('Error adding account: ' + e);
+    return { success: false, ok: false, error: e.message };
+  }
+}
+
+/**
+ * Bulk-extract account info from an array of SMS strings (server-side).
+ * @param {Array} smsArray
+ */
+function SOV1_UI_bulkExtractAccounts_(smsArray) {
+  try {
+    var out = [];
+    smsArray = smsArray || [];
+    for (var i = 0; i < smsArray.length; i++) {
+      var sms = String(smsArray[i] || '');
+      var res = extractAccountFromSMS_(sms);
+      out.push({ sms: sms, result: res });
+    }
+    return { success: true, results: out };
+  } catch (e) {
+    Logger.log('Error in bulk extract: ' + e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Bulk add accounts (array of account objects)
+ */
+function SOV1_UI_bulkAddAccounts_(accounts) {
+  try {
+    var results = [];
+    accounts = accounts || [];
+    for (var j = 0; j < accounts.length; j++) {
+      var acc = accounts[j];
+      var r = SOV1_UI_addAccount_(acc);
+      results.push({ account: acc, result: r });
+    }
+
+    // Clear cache and log
+    CacheService.getScriptCache().remove('ACCOUNTS_INDEX_V2');
+    try { if (typeof logIngressEvent_ === 'function') logIngressEvent_('INFO','SOV1_UI_bulkAddAccounts_',{count: accounts.length}, 'bulk add'); } catch(e) {}
+
+    return { success: true, results: results };
+  } catch (e) {
+    Logger.log('Error bulk adding accounts: ' + e);
     return { success: false, error: e.message };
   }
 }
@@ -266,11 +349,15 @@ function SOV1_UI_updateAccount_(rowId, accountData) {
     ]]);
     
     CacheService.getScriptCache().remove('ACCOUNTS_INDEX_V2');
+    CacheService.getScriptCache().remove('SJA_DASH_DATA');
+
+    // Log update for observability
+    try { if (typeof logIngressEvent_ === 'function') logIngressEvent_('INFO', 'SOV1_UI_updateAccount_', { row: rowId, name: accountData.name, number: accountData.number || '' }, 'account updated'); } catch (e) {}
     
-    return { success: true, message: 'تم تحديث الحساب بنجاح' };
+    return { success: true, ok: true, message: 'تم تحديث الحساب بنجاح' };
   } catch (e) {
     Logger.log('Error updating account: ' + e);
-    return { success: false, error: e.message };
+    return { success: false, ok: false, error: e.message };
   }
 }
 
@@ -279,16 +366,178 @@ function SOV1_UI_updateAccount_(rowId, accountData) {
  */
 function SOV1_UI_deleteAccount_(rowId) {
   try {
-    if (!rowId || rowId < 2) return { success: false, error: 'معرف غير صالح' };
+    if (!rowId || rowId < 2) return { success: false, ok: false, error: 'معرف غير صالح' };
     
     var sh = ensureAccountsSheet_();
     sh.deleteRow(rowId);
     
+    CacheService.getScriptCache().remove('SJA_DASH_DATA');
+    
     CacheService.getScriptCache().remove('ACCOUNTS_INDEX_V2');
-    return { success: true, message: 'تم حذف الحساب بنجاح' };
+    return { success: true, ok: true, message: 'تم حذف الحساب بنجاح' };
   } catch (e) {
-    return { success: false, error: e.message };
+    return { success: false, ok: false, error: e.message };
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// CLEANUP HELPERS
+// ═══════════════════════════════════════════════════════════════════════
+
+function CLEAN_ACCOUNTS_AUTOFIX_() {
+  var sh = ensureAccountsSheet_();
+  var last = sh.getLastRow();
+  if (last < 2) return { success: true, message: 'No accounts' };
+
+  var rows = sh.getRange(2, 1, last - 1, 10).getValues();
+
+  function normBank(name, bank, aliases) {
+    var text = [name, bank, aliases].join(' ');
+    if (/الراجحي|Alrajhi|ALBI/i.test(text)) return 'Alrajhi';
+    if (/SAIB|ساب|Saudi Investment/i.test(text)) return 'SAIB';
+    if (/STC Bank|بنك الاتصالات|\bSTC\b/i.test(text)) return 'STC Bank';
+    if (/D360|d360/i.test(text)) return 'D360';
+    if (/Tiqmo|تيقمو/i.test(text)) return 'Tiqmo';
+    return '';
+  }
+
+  function normNumber(num) {
+    var n = String(num || '').replace(/\s+/g, '').replace(/^\*+/, '');
+    if (/^\d{3}$/.test(n)) n = '0' + n;
+    return n;
+  }
+
+  var allowed = { 'Alrajhi': true, 'SAIB': true, 'STC Bank': true, 'Tiqmo': true, 'D360': true };
+  var seen = {};
+  var toDelete = [];
+  var toUpdate = [];
+
+  rows.forEach(function(r, idx) {
+    var rowId = idx + 2;
+    var name = String(r[0] || '');
+    var type = String(r[1] || '');
+    var number = normNumber(r[2] || '');
+    var bank = normBank(name, r[3], r[8]);
+    var balance = Number(r[4] || 0);
+    var aliases = String(r[8] || '');
+    var notes = String(r[9] || '');
+
+    // Drop placeholders, unknown bank, or bad imports
+    if (!bank || !allowed[bank]) {
+      toDelete.push(rowId);
+      return;
+    }
+
+    if (!number) {
+      toDelete.push(rowId);
+      return;
+    }
+
+    if (/\bTBD\b|غير محدد|Add last-4/i.test(name + ' ' + notes)) {
+      toDelete.push(rowId);
+      return;
+    }
+
+    if (/MasterCard|Visa/i.test(String(r[3] || ''))) {
+      toDelete.push(rowId);
+      return;
+    }
+
+    var key = bank + '|' + number;
+    if (number && seen[key]) {
+      // Keep the one with non-zero balance if possible
+      if (balance !== 0 && seen[key].balance === 0) {
+        toDelete.push(seen[key].rowId);
+        seen[key] = { rowId: rowId, balance: balance };
+      } else {
+        toDelete.push(rowId);
+      }
+      return;
+    }
+
+    seen[key] = { rowId: rowId, balance: balance };
+
+    // Queue normalized updates
+    if (String(r[2] || '') !== number || String(r[3] || '') !== bank || String(r[1] || '') !== type) {
+      toUpdate.push({ rowId: rowId, number: number, bank: bank, type: type });
+    }
+  });
+
+  // Apply updates
+  toUpdate.forEach(function(u) {
+    sh.getRange(u.rowId, 2).setValue(u.type);
+    sh.getRange(u.rowId, 3).setValue(u.number);
+    sh.getRange(u.rowId, 4).setValue(u.bank);
+  });
+
+  // Delete rows bottom-up
+  toDelete.sort(function(a, b) { return b - a; }).forEach(function(rowId) {
+    sh.deleteRow(rowId);
+  });
+
+  CacheService.getScriptCache().remove('ACCOUNTS_INDEX_V2');
+  return { success: true, removed: toDelete.length, updated: toUpdate.length };
+}
+
+function RESET_ACCOUNTS_CANONICAL_() {
+  // Config Updated: 2026-01-31 (Strict 7-Entity Logic)
+  var sh = ensureAccountsSheet_();
+  var last = sh.getLastRow();
+  var existing = last > 1 ? sh.getRange(2, 1, last - 1, 10).getValues() : [];
+
+  function key(bank, number) {
+    return String(bank || '').trim().toLowerCase() + '|' + String(number || '').trim();
+  }
+
+  var balances = {};
+  existing.forEach(function(r) {
+    var k = key(r[3], r[2]);
+    if (!balances[k]) balances[k] = Number(r[4] || 0);
+  });
+
+  var canonical = [
+    // ════════════════════════════════════════════════════════════════════════════════
+    // 1. SAIB (1 Account + 1 Card) -> Single Entity
+    // ════════════════════════════════════════════════════════════════════════════════
+    ['SAIB', 'بنك', '8001', 'SAIB', 0, new Date(), 'TRUE', 'FALSE', 'SAIB,saib,البنك السعودي للاستثمار,*3474,3474', 'الحساب الرئيسي + بطاقة 3474'],
+
+    // ════════════════════════════════════════════════════════════════════════════════
+    // 2. STC Bank (1 Account + 2 Cards) -> Single Entity
+    // ════════════════════════════════════════════════════════════════════════════════
+    ['STC Bank', 'بنك', '1929', 'STC Bank', 0, new Date(), 'TRUE', 'FALSE', 'STC Bank,STC,stc pay,*3281,3281,*4495,4495', 'حساب 1929 + بطاقات (3281, 4495)'],
+
+    // ════════════════════════════════════════════════════════════════════════════════
+    // 3. Tiqmo (1 Account + 1 Card) -> Single Entity
+    // ════════════════════════════════════════════════════════════════════════════════
+    ['Tiqmo', 'بنك', '9682', 'Tiqmo', 0, new Date(), 'TRUE', 'FALSE', 'Tiqmo,tiqmo,تيقمو,*0305,0305', 'حساب 9682 + بطاقة 0305'],
+
+    // ════════════════════════════════════════════════════════════════════════════════
+    // 4. D360 (1 Account + 1 Card) -> Single Entity
+    // ════════════════════════════════════════════════════════════════════════════════
+    // Note: User provided Card 3449 only. Treating as the main identifier.
+    ['D360', 'بنك', '3449', 'D360', 0, new Date(), 'TRUE', 'FALSE', 'D360,d360,دي 360', 'حساب/بطاقة 3449'],
+
+    // ════════════════════════════════════════════════════════════════════════════════
+    // 5, 6, 7. Alrajhi (3 Separate Accounts)
+    // ════════════════════════════════════════════════════════════════════════════════
+    ['الراجحي - 9767', 'بنك', '9767', 'Alrajhi', 0, new Date(), 'TRUE', 'FALSE', 'الراجحي,Alrajhi,ALBI', 'حوالات (محمد الحربي)'],
+    ['الراجحي - 9765', 'بنك', '9765', 'Alrajhi', 0, new Date(), 'TRUE', 'FALSE', 'الراجحي,Alrajhi', 'إيداعات (ابتسام)'],
+    ['الراجحي - 1626', 'بنك', '1626', 'Alrajhi', 0, new Date(), 'TRUE', 'FALSE', 'الراجحي,Alrajhi', 'حوالات داخلية (جهز)']
+  ];
+
+  canonical.forEach(function(r) {
+    var b = balances[key(r[3], r[2])];
+    if (typeof b === 'number' && !isNaN(b)) r[4] = b;
+  });
+
+  // Clear existing rows
+  if (last > 1) sh.deleteRows(2, last - 1);
+  // Preserve leading zeros in account/card numbers
+  sh.getRange(2, 3, canonical.length, 1).setNumberFormat('@');
+  sh.getRange(2, 1, canonical.length, 10).setValues(canonical);
+
+  CacheService.getScriptCache().remove('ACCOUNTS_INDEX_V2');
+  return { success: true, count: canonical.length };
 }
 
 /**
@@ -300,7 +549,19 @@ function getAccountByNumber_(number) {
   
   // Use the cached index for speed
   var idx = loadAccountsIndex_();
+  
+  // 1. Direct match on Account Number
   if (idx.byLast[numStr]) return idx.byLast[numStr];
+  
+  // 2. Fallback to Aliases (e.g. Card Numbers linked to account)
+  // Check exact string match in alias keys (aliases are stored lowercase in index)
+  if (idx.byAlias[numStr.toLowerCase()]) return idx.byAlias[numStr.toLowerCase()];
+  
+  // 3. Try prepending '*' if not present (common in SMS)
+  if (!numStr.startsWith('*')) {
+    var starKey = '*' + numStr;
+    if (idx.byAlias[starKey.toLowerCase()]) return idx.byAlias[starKey.toLowerCase()];
+  }
   
   return null;
 }

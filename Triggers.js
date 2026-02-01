@@ -136,3 +136,44 @@ function monthlyReport() {
 
   sendTelegram_(ENV.CHAT_ID, msg);
 }
+
+/**
+ * CLI helper: list current project triggers for inspection
+ * Returns array: [{handler, triggerSource, eventType, nextRun}] (best-effort)
+ */
+function LIST_PROJECT_TRIGGERS() {
+  try {
+    var ts = ScriptApp.getProjectTriggers();
+    var out = ts.map(function(t){
+      var obj = { handler: t.getHandlerFunction ? t.getHandlerFunction() : 'unknown' };
+      try { obj.source = t.getTriggerSource ? String(t.getTriggerSource()) : 'unknown'; } catch (e) { obj.source = 'unknown'; }
+      try { obj.eventType = t.getEventType ? String(t.getEventType()) : 'time'; } catch (e) { obj.eventType = 'time'; }
+      try { obj.nextRun = t.getNextRunTime ? String(t.getNextRunTime()) : null; } catch (e) { obj.nextRun = null; }
+      return obj;
+    });
+    return { success: true, triggers: out };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+}
+
+/**
+ * Keep only allowed triggers (array of handler names). Deletes others.
+ * Use: SOV1_enforceTriggers_(['SOV1_processQueueBatch_','weeklyReport','monthlyReport'])
+ */
+function SOV1_enforceTriggers_(allowed) {
+  allowed = allowed || ['SOV1_processQueueBatch_', 'weeklyReport', 'monthlyReport'];
+  var ts = ScriptApp.getProjectTriggers();
+  var deleted = [];
+  ts.forEach(function(t) {
+    try {
+      var fn = t.getHandlerFunction ? t.getHandlerFunction() : null;
+      if (fn && allowed.indexOf(fn) === -1) {
+        ScriptApp.deleteTrigger(t);
+        deleted.push(fn);
+      }
+    } catch (e) {}
+  });
+
+  return { success: true, deleted: deleted, keep: allowed };
+}

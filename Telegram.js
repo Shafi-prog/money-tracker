@@ -94,8 +94,8 @@ function V120_sendMenuPanel_(chatId) { return sendMenuPanel_(chatId); }
 function V120_removeMenuPanel_(chatId) { return removeMenuPanel_(chatId); }
 
 /** ===== ملخص Budgets (Cache 15 ثانية) ===== */
-function sendBudgetsSnapshotToTelegram_() {
-  var hub = getHubChatId_();
+function sendBudgetsSnapshotToTelegram_(chatId) {
+  var hub = String(chatId || getHubChatId_());
   if (!hub) return;
   
   // Check if budget alerts are enabled
@@ -173,6 +173,7 @@ function sendLastNToTelegram_(chatId, n) {
 
 /** ===== ملخص اليوم/الأسبوع/الشهر (Cache 15 ثانية) ===== */
 function sendPeriodSummary_(chatId, mode) {
+  logIngressEvent_('INFO', 'sendPeriodSummary', {chatId: chatId, mode: mode}, 'start');
   // Check if notifications are enabled
   if (typeof areNotificationsEnabled === 'function' && !areNotificationsEnabled()) {
     sendTelegram_(chatId, 'الإشعارات معطلة في الإعدادات. يمكنك تفعيلها من صفحة الإعدادات.');
@@ -296,7 +297,8 @@ function sendTransactionReport(ai, sync, src, raw, destChatId) {
 
   var amount = Number(ai && ai.amount ? ai.amount : 0);
   var merchant = (ai && ai.merchant) ? String(ai.merchant) : 'غير محدد';
-  var category = (ai && ai.category) ? String(ai.category) : 'أخرى';
+  var categoryRaw = (ai && ai.category) ? String(ai.category) : 'أخرى';
+  var category = categoryRaw;
   var type = (ai && ai.type) ? String(ai.type) : 'حوالة';
   var isIncoming = !!(ai && ai.isIncoming);
   var accNum = (ai && ai.accNum) ? String(ai.accNum) : '';
@@ -316,13 +318,17 @@ function sendTransactionReport(ai, sync, src, raw, destChatId) {
     if (nameMatch) merchant = nameMatch[1].trim();
   }
   
-  // استخراج التاريخ من النص الخام
+  // استخراج التاريخ والوقت من النص الخام
   var dateStr = '';
+  var timeStr = '';
   if (raw) {
     var dateMatch = String(raw).match(/(\d{1,2}\/\d{1,2}\/\d{2,4})/);
     if (dateMatch) dateStr = dateMatch[1];
+    var timeMatch = String(raw).match(/(\d{1,2}:\d{2}(?::\d{2})?)/);
+    if (timeMatch) timeStr = timeMatch[1];
   }
   if (!dateStr) dateStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'd/M/yy');
+  if (timeStr) dateStr = dateStr + ' ' + timeStr;
 
   // تحديد نوع العملية للعنوان
   var isTransfer = /حوالة/i.test(type) || /حوالة/i.test(category);
@@ -332,6 +338,13 @@ function sendTransactionReport(ai, sync, src, raw, destChatId) {
   var operationType = 'عملية';
   if (isTransfer) operationType = 'حوالة';
   else if (isWithdrawal) operationType = 'سحب';
+
+  // Normalize category for display
+  if (typeof _normalizeCategoryNameArabic_ === 'function') {
+    category = _normalizeCategoryNameArabic_(category) || category;
+  }
+  if (/^pos$/i.test(category) || /^unknown$/i.test(category)) category = 'أخرى';
+  if (isTransfer) category = 'تحويل';
 
   // الرمز حسب الاتجاه
   var directionEmoji = isIncoming ? '⬇️' : '⬆️';
@@ -366,22 +379,31 @@ function sendTransactionReport(ai, sync, src, raw, destChatId) {
   
   // تحديد الحساب للعرض
   var accountDisplay = cardNum || accNum || '';
+  var accountName = '';
+  try {
+    if (typeof getAccountInfoForNotification_ === 'function') {
+      var accInfo = getAccountInfoForNotification_(ai || {});
+      if (accInfo && accInfo.nameEn) accountName = accInfo.nameEn;
+    }
+  } catch (eAcc) {}
   
   // ===== التنسيق المطلوب =====
-  var html = '✅ <b>رصـد مـالـي ' + operationType + '</b>\n';
+  var html = '✅ <b>رصـد مـالـي • ' + escHtml_(operationType) + '</b>\n';
   html += '━━━━━━━━━━━━━━\n';
-  html += '📅 التاريخ: ' + escHtml_(dateStr) + '\n';
-  html += '💰 المبلغ: <b>' + escHtml_(amount.toFixed(2)) + ' SAR</b> ' + directionEmoji + '\n';
-  
-  if (accountDisplay) {
-    html += '🆔 الحساب: ' + escHtml_(accountDisplay) + '\n';
-  }
-  if (bankName) {
-    html += 'البنك: ' + escHtml_(bankName) + '\n';
-  }
-  
-  html += '🛒 المتجر: ' + escHtml_(merchant) + '\n';
-  html += '🏷️ التصنيف: ' + escHtml_(category) + '\n';
+
+  var accLabel = accountDisplay ? (accountName ? (accountName + ' • ' + accountDisplay) : accountDisplay) : '';
+  var partyLabel = isTransfer ? (isIncoming ? 'من' : 'إلى') : 'المتجر';
+  var partyValue = isTransfer ? merchant : merchant;
+
+  var table = [];
+  table.push('التاريخ    | ' + dateStr);
+  table.push('المبلغ     | ' + amount.toFixed(2) + ' SAR ' + directionEmoji);
+  if (accLabel) table.push('الحساب    | ' + accLabel);
+  if (bankName) table.push('البنك     | ' + bankName);
+  table.push(partyLabel + padLabel_(partyLabel) + ' | ' + partyValue);
+  table.push('التصنيف    | ' + category);
+
+  html += '<pre>' + escHtml_(table.join('\n')) + '</pre>';
   
   // عرض جميع الأرصدة الحالية
   if (typeof getAllBalancesHTML_ === 'function') {
@@ -467,6 +489,12 @@ function searchTransactions_(chatId, query) {
   }
   
   sendTelegramLogged_(chatId, out.join('\n'), { parse_mode: 'HTML' });
+}
+
+function padLabel_(label) {
+  var base = '        ';
+  var len = String(label || '').length;
+  return base.slice(Math.min(len, base.length));
 }
 
 /** ===== إدخال يدوي سريع ===== */

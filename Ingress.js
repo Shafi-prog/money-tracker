@@ -22,7 +22,7 @@
  * 2) JSON: { from, body, date, id, provider }
  * 3) form-urlencoded: body=...&from=... (مثل بعض خدمات الـ forwarder)
  */
-function doPost(e) {
+function SOV1_INGRESS_doPost_(e) {
   try {
     var rawBody = (e && e.postData && e.postData.contents) ? String(e.postData.contents) : "";
     
@@ -495,14 +495,14 @@ function handleTelegramWebhook_(update) {
     // Log incoming telegram text for traceability (short preview)
     try { logIngressEvent_('INFO', 'tg_received', { chatId: chatId, preview: String(text || '').slice(0,160) }, 'telegram'); } catch (e) {}
 
+    // 3) تحقق من الأوامر (process commands first to avoid dedup blocking legitimate commands)
+    if (text.charAt(0) === '/') {
+      return handleTelegramCommand_(chatId, text, msg);
+    }
+
     // Dedup نصوص Telegram لتفادي التكرار عند إعادة الإرسال
     if (isDuplicateTelegramText_(chatId, text)) {
       return json_(200, { ok: true, type: "dup_text" });
-    }
-    
-    // 3) تحقق من الأوامر
-    if (text.charAt(0) === '/') {
-      return handleTelegramCommand_(chatId, text, msg);
     }
     
     // 4) تحقق من أوامر لوحة التحكم
@@ -586,7 +586,7 @@ function TEST_TELEGRAM_MESSAGE_() {
  * معالجة أوامر Telegram (تبدأ بـ /)
  */
 function handleTelegramCommand_(chatId, text, msg) {
-  var cmd = text.split(/\s+/)[0].toLowerCase();
+  var cmd = text.split(/\s+/)[0].split('@')[0].toLowerCase();
   
   switch (cmd) {
     case '/menu':
@@ -621,15 +621,32 @@ function handleTelegramCommand_(chatId, text, msg) {
       
     case '/budgets':
     case '/ميزانية':
-      if (typeof sendBudgetsSnapshotToTelegram_ === "function") sendBudgetsSnapshotToTelegram_();
+      if (typeof sendBudgetsSnapshotToTelegram_ === "function") sendBudgetsSnapshotToTelegram_(chatId);
       break;
 
     case '/balances':
-    case '/أرصدة':
-      if (typeof sendAllBalancesToTelegram_ === 'function') {
-        sendAllBalancesToTelegram_(chatId);
+    case '/setbalance':
+      if (text.toLowerCase().indexOf('/setbalance') === 0) {
+        // Handle setbalance command
+        var parts = text.replace(/^\/setbalance/i, '').trim().split(/\s+/);
+        if (parts.length >= 2) {
+          var accNum = parts[0];
+          var newBal = parseFloat(parts[1]);
+          if (accNum && !isNaN(newBal)) {
+             if (typeof setBalance_ === 'function') {
+                setBalance_(accNum, newBal);
+                sendTelegram_(chatId, '✅ تم تحديث رصيد حساب *' + accNum + '* إلى ' + newBal + ' SAR');
+             }
+          } else {
+             sendTelegram_(chatId, '❌ الصيغة: /setbalance رقم_الحساب الرصيد');
+          }
+        } else {
+           sendTelegram_(chatId, '❌ الصيغة: /setbalance 9767 5000\n(استخدم آخر 4 أرقام)');
+        }
+      } else if (typeof sendAccountsBalanceReport_ === 'function') {
+         sendAccountsBalanceReport_(chatId);
       } else {
-        sendTelegram_(chatId, '⚠️ وظيفة الأرصدة غير متاحة حالياً.');
+         sendTelegram_(chatId, '⚠️ وظيفة الأرصدة غير متاحة حالياً.');
       }
       break;
 
@@ -653,15 +670,18 @@ function handleTelegramCommand_(chatId, text, msg) {
     case '/مساعدة':
       sendTelegram_(chatId, 
         "📋 <b>الأوامر المتاحة:</b>\n\n" +
-        "/start - بدء\n" +
-        "/help - المساعدة\n" +
-        "/balances - أرصدة الحسابات 💰\n" +
+        "/start - بدء البوت وإظهار القائمة\n" +
+        "/menu - إظهار لوحة التحكم\n" +
+        "/today - تقرير اليوم\n" +
+        "/week - تقرير الأسبوع\n" +
+        "/month - تقرير الشهر\n" +
+        "/budgets - ملخص الميزانيات\n" +
+        "/balances - أرصدة الحسابات\n" +
         "/last - آخر 5 عمليات\n" +
-        "/summary - ملخص الشهر\n" +
-        "/budgets - الميزانيات\n" +
-        "/debts - الديون\n" +
-        "/add - إضافة يدوية\n" +
-        "/test - اختبار الاتصال 🔧"
+        "/search - بحث: /search كلمة\n" +
+        "/add - إدخال يدوي: /add مبلغ|جهة|تصنيف\n" +
+        "/status - حالة النظام\n" +
+        "/help - مساعدة وتعليمات"
       );
       break;
 

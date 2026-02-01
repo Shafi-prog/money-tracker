@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="utf-8"/>
@@ -20,12 +20,12 @@
         page: 'dashboard',
         mobileMenu: false,
         loading: false,
-        loadingStates: { settings: false, transactions: false, budgets: false, accounts: false },
+        loadingStates: { settings: false, transactions: false, budgets: false, accounts: false, parsing: false },
         setupMode: false,
         setupStep: 1,
         configStatus: { hasSheet: false, hasTelegram: false, hasAI: false },
         setupData: { botToken: '', chatId: '', sheetId: '' },
-        stats: { income: 0, expense: 0, balance: 0, savings: 0 },
+        stats: { income: 0, expense: 0, balance: 0, savings: 0, incomeDeltaText: '' },
         transactions: [],
         allTransactions: [],
         filteredTransactions: [],
@@ -35,8 +35,13 @@
         showAddModal: false,
         showEditTransactionModal: false,
         editingTransaction: null,
-        newTransaction: { amount: '', merchant: '', category: 'أخرى', type: 'expense' },
+        newTransaction: { amount: '', merchant: '', category: 'أخرى', type: 'expense', account: 'نقدي', notes: '' },
+        // AI Parsing State
+        pasting: false,
+        rawPasteInput: '',
+        loadingStates: { parsing: false },
         categories: [], // Loaded dynamically from backend
+        categoryOptions: [],
         categoriesLoaded: false,
         userSettings: { user_name: '', user_email: '', enable_notifications: true, telegram_notifications: true, budget_alerts: true, default_currency: 'SAR', language: 'ar', salary_day: 1, auto_apply_rules: true },
         reportPeriod: 'monthly',
@@ -45,7 +50,12 @@
         showAccountModal: false,
         showAIExtraction: false,
         editingAccount: null,
-        newAccount: { name: '', type: 'بنك', number: '', bank: '', aliases: '', isMine: true, isInternal: false, smsText: '' },
+        newAccount: { name: '', type: 'بنك', number: '', bank: '', balance: 0, aliases: '', isMine: true, isInternal: false, notes: '', smsText: '' },
+        // Bulk import states
+        showBulkImportModal: false,
+        bulkSmsText: '',
+        bulkParseResults: [],
+        bulkParsing: false,
         showBudgetModal: false,
         editingBudget: null,
         newBudget: { category: '', limit: '' },
@@ -141,7 +151,7 @@
               console.warn('⚠️ Failed to load categories:', err);
               this.categories = ['طعام', 'نقل', 'فواتير', 'تسوق', 'سكن', 'ترفيه', 'صحة', 'راتب', 'تحويل', 'أخرى'];
             })
-            .SOV1_UI_getCategories_('OPEN');
+            .SOV1_UI_getCategories('OPEN');
         },
         
         // NEW: Process fast API data
@@ -157,6 +167,9 @@
             }
             if (data.budgets) {
               this.budgets = data.budgets;
+            }
+            if (data.accounts) {
+              this.accounts = data.accounts;
             }
             // Also load categories
             this.loadCategories();
@@ -314,8 +327,16 @@
               if (data.dashboard && data.dashboard.kpi) {
                 this.stats.income = data.dashboard.kpi.incomeM || 0;
                 this.stats.expense = data.dashboard.kpi.spendM || 0;
-                this.stats.balance = data.dashboard.kpi.netM || 0;
-                this.stats.savings = data.dashboard.kpi.totalRemain || 0;
+                this.stats.balance = data.dashboard.kpi.totalBalance || data.dashboard.kpi.netM || 0;  // ✅ Use total account balance
+                this.stats.savings = data.dashboard.kpi.netM || 0;  // ✅ Net = Income - Expense
+                const delta = data.dashboard.kpi.incomeDeltaPct;
+                if (typeof delta === 'number') {
+                  const sign = delta >= 0 ? '+' : '';
+                  const pct = Math.abs(delta).toFixed(1);
+                  this.stats.incomeDeltaText = sign + pct + '% عن الشهر الماضي';
+                } else {
+                  this.stats.incomeDeltaText = '';
+                }
                 console.log('✅ KPI loaded:', this.stats);
               } else {
                 console.warn('⚠️ No KPI data in response');
@@ -324,12 +345,17 @@
               // Load transactions
               if (data.transactions && Array.isArray(data.transactions)) {
                 this.allTransactions = data.transactions.map((tx, i) => ({
-                  id: tx.row || i,
+                  id: tx.uuid || tx.row || i,  // ✅ Prefer UUID for tracking
+                  row: tx.row,  // Keep row for reference
+                  uuid: tx.uuid || '', 
                   date: tx.date,
                   merchant: tx.merchant || 'غير محدد',
                   category: tx.category || tx.type || 'أخرى',
                   amount: tx.amount || 0,
-                  type: tx.type || ''
+                  type: tx.type || '',
+                  account: tx.account || '',
+                  notes: tx.notes || '',
+                  source: tx.source || '' 
                 }));
                 this.transactions = this.allTransactions.slice(0, 10);
                 console.log('✅ Transactions loaded:', this.transactions.length);
@@ -404,14 +430,14 @@
               if (result.success) {
                 this.setupMode = false;
                 this.refreshData();
-                alert('✅ تم إعداد النظام بنجاح!');
+                this.showToast('✅ تم إعداد النظام بنجاح!');
               } else {
-                alert('❌ فشل الإعداد: ' + result.message);
+                this.showToast('❌ فشل الإعداد: ' + result.message, 'error');
               }
             })
             .withFailureHandler(err => {
               this.loading = false;
-              alert('❌ خطأ: ' + err.message);
+              this.showToast('❌ خطأ: ' + err.message, 'error');
             })
             .SOV1_UI_quickSetup(this.setupData);
         },
@@ -444,13 +470,19 @@
         },
         
         getCategoryIcon(cat) {
-            const map = { 
-              'طعام': '🍔', 'نقل': '🚕', 'فواتير': '🧾', 'تسوق': '🛍️', 
+            const map = {
+              'طعام': '🍔', 'نقل': '🚕', 'فواتير': '🧾', 'تسوق': '🛍️',
               'مطاعم': '🌭', 'سكن': '🏠', 'ترفيه': '🎮', 'صحة': '💊',
               'تعليم': '📚', 'راتب': '💰', 'استثمار': '📈'
             };
             return map[cat] || '💸';
-        },
+          },
+          
+          getAccountDisplay(val) {
+              if(!val) return '';
+              const acc = this.accounts.find(a => a.number && String(a.number).endsWith(String(val)));
+              return acc ? acc.name : val;
+          },
 
         showAllTransactions() {
           this.page = 'transactions';
@@ -459,7 +491,85 @@
         
         openAddModal() {
           this.showAddModal = true;
-          this.newTransaction = { amount: '', merchant: '', category: 'أخرى', type: 'expense' };
+          this.newTransaction = { amount: '', merchant: '', category: 'أخرى', type: 'expense', notes: '', account: 'نقدي' };
+          this.rawPasteInput = '';  // Clear paste input for fresh start
+        },
+        
+        parseRawText() {
+          const text = this.rawPasteInput;
+          if (!text) {
+              this.showToast('Please paste some text first', 'warning');
+              return;
+          }
+          
+          // Bulk paste support (separated by blank lines)
+          const chunks = text.split(/\n\s*\n/).map(t => t.trim()).filter(t => t.length > 0);
+          if (chunks.length > 1) {
+              this.loadingStates.parsing = true;
+              google.script.run
+                .withSuccessHandler(res => {
+                  this.loadingStates.parsing = false;
+                  if (res && res.success) {
+                    this.showToast('✅ تم إضافة ' + (res.added || 0) + ' عمليات بنجاح');
+                    this.rawPasteInput = '';
+                    this.pasting = false;
+                    this.refreshData();
+                  } else {
+                    this.showToast('❌ فشل التحليل: ' + (res && res.error || 'خطأ غير معروف'), 'error');
+                  }
+                })
+                .withFailureHandler(err => {
+                  this.loadingStates.parsing = false;
+                  this.showToast('AI Error: ' + err.message, 'error');
+                })
+                .SOV1_UI_bulkIngestSMS(chunks);
+              return;
+          }
+
+          this.loadingStates.parsing = true;
+          
+          google.script.run
+            .withSuccessHandler(res => {
+              this.loadingStates.parsing = false;
+              if (res.success && res.result) {
+                const r = res.result;
+                // Auto-fill form
+                if (r.amount) this.newTransaction.amount = r.amount;
+                if (r.merchant) this.newTransaction.merchant = r.merchant;
+                if (r.category) this.newTransaction.category = r.category;
+                
+                // Smart Type Detection
+                if (r.type) {
+                     this.newTransaction.type = (r.type === 'income') ? 'income' : 'expense';
+                } else if (r.isIncoming !== undefined) {
+                     this.newTransaction.type = r.isIncoming ? 'income' : 'expense';
+                }
+
+                // Append any notes
+                if (r.notes) this.newTransaction.notes = r.notes;
+
+                // Account Helper: Try to match last 4 digits if provided
+                if (r.accNum) {
+                    const match = this.accounts.find(a => a.number && a.number.toString().endsWith(r.accNum));
+                    if (match) {
+                        this.newTransaction.account = match.name;
+                    }
+                }
+                
+                // Close paste area
+                this.pasting = false;
+                this.rawPasteInput = '';
+                
+                this.showToast('✨ Parsed by Grok!', 'success');
+              } else {
+                this.showToast('❌ Parsing failed: ' + (res.error || 'Unknown'), 'error');
+              }
+            })
+            .withFailureHandler(err => {
+              this.loadingStates.parsing = false;
+              this.showToast('AI Error: ' + err.message, 'error');
+            })
+            .SOV1_UI_parseWithAI(text);
         },
         
         deleteTransaction(tx) {
@@ -471,13 +581,13 @@
           google.script.run
             .withSuccessHandler(result => {
               this.loading = false;
-              alert('✅ تم حذف العملية بنجاح');
+              this.showToast('✅ تم حذف العملية بنجاح');
               this.refreshData();
             })
             .withFailureHandler(err => {
               this.loading = false;
               this.errorMessage = 'فشل حذف العملية: ' + (err.message || err);
-              alert('❌ فشل حذف العملية: ' + (err.message || err));
+              this.showToast('❌ فشل حذف العملية: ' + (err.message || err), 'error');
             })
             .SOV1_UI_deleteTransaction(tx.id);
         },
@@ -518,9 +628,16 @@
           // Close modal immediately for better UX
           this.showAddModal = false;
           
-          const text = `أضف: ${this.newTransaction.type === 'income' ? '-' : ''}${this.newTransaction.amount} | ${this.newTransaction.merchant} | ${this.newTransaction.category}`;
+          const txData = {
+              amount: this.newTransaction.amount,
+              merchant: this.newTransaction.merchant,
+              category: this.newTransaction.category,
+              type: this.newTransaction.type,
+              notes: this.newTransaction.notes || '',
+              account: this.newTransaction.account || 'نقدي'
+          };
           
-          console.log('Adding transaction (optimistic):', text);
+          console.log('Adding transaction (optimistic):', txData);
           
           // Backend sync (async)
           google.script.run
@@ -534,10 +651,10 @@
               this.transactions = this.transactions.filter(t => t.id !== optimisticTx.id);
               this.allTransactions = this.allTransactions.filter(t => t.id !== optimisticTx.id);
               this.errorMessage = 'فشل إضافة العملية: ' + (err.message || err);
-              alert('❌ فشل إضافة العملية. سيتم التحديث.');
+              this.showToast('❌ فشل إضافة العملية. سيتم التحديث.', 'error');
               this.refreshData();
             })
-            .SOV1_UI_addManualTransaction(text);
+            .SOV1_UI_createTransaction(txData);
         },
         
         saveSettings() {
@@ -669,12 +786,15 @@
           
           google.script.run
             .withSuccessHandler(categories => {
-              this.categories = categories || [];
+              const cats = categories || [];
+              this.categories = cats;
+              this.categoryOptions = cats.map(c => typeof c === 'object' ? c.name : c).filter(Boolean);
               this.categoriesLoaded = true;
             })
             .withFailureHandler(err => {
               console.error('Failed to load categories:', err);
               this.categories = [];
+              this.categoryOptions = [];
             })
             .SOV1_UI_getCategoriesManage('OPEN');
         },
@@ -700,25 +820,47 @@
           const isEditing = this.editingCategory !== null;
           const action = isEditing ? 'تحديث' : 'إضافة';
 
-          google.script.run
-            .withSuccessHandler(result => {
-              this.showToast('تم ' + action + ' التصنيف بنجاح');
-              this.showCategoryModal = false;
-              this.loadCategories();
-              this.refreshData(); // Refresh to update categories in other components
-            })
-            .withFailureHandler(err => {
-              this.showToast('فشل ' + action + ' التصنيف: ' + (err.message || err), 'error');
-            })
-            [isEditing ? 'SOV1_UI_updateCategory' : 'SOV1_UI_addCategory'](
-              'OPEN',
-              isEditing ? this.editingCategory.row : this.newCategory.name,
-              this.newCategory.name,
-              this.newCategory.icon,
-              this.newCategory.color,
-              this.newCategory.type,
-              this.newCategory.description
-            );
+          if (isEditing) {
+            // SOV1_UI_updateCategory(token, row, name, icon, color, active, description)
+            google.script.run
+              .withSuccessHandler(result => {
+                this.showToast('تم ' + action + ' التصنيف بنجاح');
+                this.showCategoryModal = false;
+                this.loadCategories();
+                this.refreshData();
+              })
+              .withFailureHandler(err => {
+                this.showToast('فشل ' + action + ' التصنيف: ' + (err.message || err), 'error');
+              })
+              .SOV1_UI_updateCategory(
+                'OPEN',
+                this.editingCategory.row,
+                this.newCategory.name,
+                this.newCategory.icon,
+                this.newCategory.color,
+                true, // active
+                this.newCategory.description
+              );
+          } else {
+            // SOV1_UI_addCategory(token, name, icon, color, description)
+            google.script.run
+              .withSuccessHandler(result => {
+                this.showToast('تم ' + action + ' التصنيف بنجاح');
+                this.showCategoryModal = false;
+                this.loadCategories();
+                this.refreshData();
+              })
+              .withFailureHandler(err => {
+                this.showToast('فشل ' + action + ' التصنيف: ' + (err.message || err), 'error');
+              })
+              .SOV1_UI_addCategory(
+                'OPEN',
+                this.newCategory.name,
+                this.newCategory.icon,
+                this.newCategory.color,
+                this.newCategory.description
+              );
+          }
         },
 
         deleteCategory(categoryName) {
@@ -757,7 +899,7 @@
         
         saveSettings() {
           if (!this.userSettings.user_name) {
-            alert('يرجى إدخال الاسم');
+            this.showToast('يرجى إدخال الاسم', 'error');
             return;
           }
           
@@ -774,27 +916,27 @@
             .withSuccessHandler((result) => {
               clearTimeout(timeoutId);
               this.loading = false;
-              alert('✅ تم حفظ الإعدادات بنجاح');
+              this.showToast('✅ تم حفظ الإعدادات بنجاح');
               console.log('Settings saved:', result);
             })
             .withFailureHandler(err => {
               clearTimeout(timeoutId);
               this.loading = false;
               this.errorMessage = 'فشل حفظ الإعدادات: ' + (err.message || err);
-              alert('❌ فشل حفظ الإعدادات: ' + (err.message || err));
+              this.showToast('❌ فشل حفظ الإعدادات: ' + (err.message || err), 'error');
             })
             .SOV1_UI_saveSettings(this.userSettings);
         },
         
         openAccountModal() {
           this.editingAccount = null;
-          this.newAccount = { name: '', type: 'بنك', number: '', bank: '', aliases: '', isMine: true, isInternal: false, smsText: '' };
+          this.newAccount = { name: '', type: 'بنك', number: '', bank: '', aliases: '', isMine: true, isInternal: false, smsText: '', balance: 0 };
           this.showAccountModal = true;
         },
         
         extractFromSMS() {
           if (!this.newAccount.smsText || this.newAccount.smsText.trim().length === 0) {
-            alert('⚠️ الرجاء لصق نص الرسالة أولاً');
+            this.showToast('⚠️ الرجاء لصق نص الرسالة أولاً', 'error');
             return;
           }
           
@@ -806,16 +948,61 @@
               if (result.success && result.account) {
                 // Auto-fill form with AI extracted data
                 this.newAccount = { ...this.newAccount, ...result.account };
-                alert('✅ تم استخراج البيانات من الرسالة!');
+                this.showToast('✅ تم استخراج البيانات من الرسالة!');
               } else {
-                alert('❌ فشل الاستخراج: ' + (result.error || 'خطأ غير معروف'));
+                this.showToast('❌ فشل الاستخراج: ' + (result.error || 'خطأ غير معروف'), 'error');
               }
             })
             .withFailureHandler(err => {
               this.loading = false;
-              alert('❌ خطأ: ' + (err.message || err));
+              this.showToast('❌ خطأ: ' + (err.message || err), 'error');
             })
             .SOV1_UI_extractAccountFromSMS(this.newAccount.smsText);
+        },
+
+        // ---------- Bulk Import SMS (frontend) ----------
+        parseBulkSms() {
+          if (!this.bulkSmsText || this.bulkSmsText.trim().length === 0) { this.showToast('⚠️ الرجاء لصق رسائل SMS أولاً', 'error'); return; }
+          this.bulkParsing = true;
+          var groups = (this.bulkSmsText || '').split(/\r?\n\s*\r?\n/).map(g => g.trim()).filter(g => g.length > 0).map(g => g.split(/\r?\n/).join(' | '));
+          google.script.run
+            .withSuccessHandler(result => {
+              this.bulkParsing = false;
+              if (result && result.success && result.results) {
+                // Attach selection flag
+                this.bulkParseResults = result.results.map(function(r) { r.selected = false; return r; });
+                this.showBulkImportModal = true;
+              } else {
+                this.showToast('❌ فشل التحليل: ' + (result && result.error || 'خطأ غير معروف'), 'error');
+              }
+            })
+            .withFailureHandler(err => { this.bulkParsing = false; this.showToast('❌ خطأ: ' + (err.message || err), 'error'); })
+            .SOV1_UI_bulkExtractAccounts(groups);
+        },
+
+        importSelectedAccounts() {
+          var selected = this.bulkParseResults.filter(r => r.selected && r.result && r.result.success && r.result.account);
+          if (selected.length === 0) { this.showToast('لا توجد عناصر محددة للاستيراد', 'error'); return; }
+          var accounts = selected.map(s => {
+            var a = s.result.account;
+            return { name: a.name || (a.bank + ' ' + (a.number || '')), type: a.type || 'بنك', number: a.number || '', bank: a.bank || '', balance: 0, isMine: true, isInternal: !!a.isInternal, aliases: a.aliases || '', notes: 'imported via bulk SMS' };
+          });
+          this.loading = true;
+          google.script.run
+            .withSuccessHandler(res => {
+              this.loading = false;
+              if (res && res.success) {
+                this.showBulkImportModal = false;
+                this.bulkParseResults = [];
+                this.bulkSmsText = '';
+                this.showToast('✅ ' + (res.results && res.results.length || 0) + ' حسابات تم استيرادها');
+                this.loadAccounts();
+              } else {
+                this.showToast('❌ فشل الاستيراد: ' + (res && res.error || 'خطأ غير معروف'), 'error');
+              }
+            })
+            .withFailureHandler(err => { this.loading = false; this.showToast('❌ خطأ: ' + (err.message || err), 'error'); })
+            .SOV1_UI_bulkAddAccounts(accounts);
         },
         
         editAccount(account) {
@@ -826,7 +1013,7 @@
         
         saveAccount() {
           if (!this.newAccount.name || !this.newAccount.type) {
-            alert('الاسم والنوع مطلوبان');
+            this.showToast('الاسم والنوع مطلوبان', 'error');
             return;
           }
           
@@ -838,12 +1025,12 @@
               .withSuccessHandler(result => {
                 this.loading = false;
                 this.showAccountModal = false;
-                alert('✅ تم تحديث الحساب');
+                this.showToast('✅ تم تحديث الحساب');
                 this.loadAccounts();
               })
               .withFailureHandler(err => {
                 this.loading = false;
-                alert('❌ فشل التحديث: ' + (err.message || err));
+                this.showToast('❌ فشل التحديث: ' + (err.message || err), 'error');
               })
               .SOV1_UI_updateAccount(this.editingAccount.id, this.newAccount);
           } else {
@@ -852,12 +1039,12 @@
               .withSuccessHandler(result => {
                 this.loading = false;
                 this.showAccountModal = false;
-                alert('✅ تم إضافة الحساب');
+                this.showToast('✅ تم إضافة الحساب');
                 this.loadAccounts();
               })
               .withFailureHandler(err => {
                 this.loading = false;
-                alert('❌ فشل الإضافة: ' + (err.message || err));
+                this.showToast('❌ فشل الإضافة: ' + (err.message || err), 'error');
               })
               .SOV1_UI_addAccount(this.newAccount);
           }
@@ -872,12 +1059,12 @@
           google.script.run
             .withSuccessHandler(result => {
               this.loading = false;
-              alert('✅ تم حذف الحساب');
+              this.showToast('✅ تم حذف الحساب');
               this.loadAccounts();
             })
             .withFailureHandler(err => {
               this.loading = false;
-              alert('❌ فشل الحذف');
+              this.showToast('❌ فشل الحذف', 'error');
             })
             .SOV1_UI_deleteAccount(account.id);
         },
@@ -1218,14 +1405,14 @@
           if (confirm('⚠️ تحذير: سيتم حذف جميع بياناتك بشكل نهائي. هل أنت متأكد؟\\n\\nاكتب \"نعم\" للتأكيد.')) {
             const confirmation = prompt('اكتب \"حذف\" للتأكيد النهائي:');
             if (confirmation === 'حذف') {
-              this.deleteAccount();
+              this.deleteUserAccount();
             } else {
               this.showToast('تم إلغاء الحذف', 'info');
             }
           }
         },
         
-        deleteAccount() {
+        deleteUserAccount() {
           this.showToast('جاري حذف الحساب...', 'info');
           google.script.run
             .withSuccessHandler(result => {
@@ -1235,7 +1422,7 @@
             .withFailureHandler(err => {
               this.showToast('فشل حذف الحساب: ' + err.message, 'error');
             })
-            .SOV1_UI_deleteAccount();
+            .SOV1_UI_deleteUserAccount();
         },
         
         searchTransactions() {
@@ -1261,11 +1448,13 @@
         openEditTransactionModal(tx) {
           this.editingTransaction = tx;
           this.newTransaction = {
-            rowId: tx.id + 2,
+            rowId: tx.uuid || tx.id, // ✅ Prefer UUID, fallback to id (which could be row)
             merchant: tx.merchant,
             category: tx.category,
             amount: tx.amount,
-            notes: tx.notes || ''
+            notes: tx.notes || '',
+            type: tx.type || 'expense',
+            account: tx.account || 'نقدي'
           };
           this.showEditTransactionModal = true;
         },
@@ -1303,7 +1492,9 @@
               merchant: this.newTransaction.merchant,
               category: this.newTransaction.category,
               amount: parseFloat(this.newTransaction.amount),
-              notes: this.newTransaction.notes
+              notes: this.newTransaction.notes,
+              type: this.newTransaction.type,
+              account: this.newTransaction.account
             });
         }
       }
@@ -1410,10 +1601,7 @@
         <span>📋</span> العمليات
       </a>
       <a href="#" @click.prevent="page='budgets'" :class="{'bg-green-50 text-green-700': page==='budgets', 'text-gray-600 hover:bg-gray-50': page!=='budgets'}" class="flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors">
-        <span>📉</span> الميزانيات
-      </a>
-      <a href="#" @click.prevent="page='categories'" :class="{'bg-green-50 text-green-700': page==='categories', 'text-gray-600 hover:bg-gray-50': page!=='categories'}" class="flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors">
-        <span>🏷️</span> التصنيفات
+        <span></span> الميزانيات والتصنيفات
       </a>
       <a href="#" @click.prevent="page='reports'" :class="{'bg-green-50 text-green-700': page==='reports', 'text-gray-600 hover:bg-gray-50': page!=='reports'}" class="flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors">
         <span>📊</span> التقارير
@@ -1462,10 +1650,7 @@
            <span>📋</span> العمليات
          </a>
          <a href="#" @click="page='budgets'; mobileMenu=false" :class="{'bg-green-50 text-green-700': page==='budgets'}" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 font-medium">
-           <span>📉</span> الميزانيات
-         </a>
-         <a href="#" @click="page='categories'; mobileMenu=false" :class="{'bg-green-50 text-green-700': page==='categories'}" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 font-medium">
-           <span>🏷️</span> التصنيفات
+           <span></span> الميزانيات والتصنيفات
          </a>
          <a href="#" @click="page='reports'; mobileMenu=false" :class="{'bg-green-50 text-green-700': page==='reports'}" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 font-medium">
            <span>📊</span> التقارير
@@ -1514,7 +1699,7 @@
              <span x-show="loading" class="animate-spin">↻</span>
              <span>تحديث</span>
            </button>
-           <button @click="openAddModal()" class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition shadow-lg shadow-green-200">
+           <button @click="openAddModal()" class="px-3 py-2 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 transition shadow-sm w-fit self-start">
              + عملية جديدة
            </button>
         </div>
@@ -1525,10 +1710,10 @@
         <!-- Balance Card -->
         <div class="bg-gradient-to-br from-indigo-500 to-blue-600 rounded-2xl p-6 text-white shadow-lg shadow-blue-100 relative overflow-hidden group hover:scale-[1.02] transition-transform">
           <div class="absolute top-0 right-0 w-32 h-32 bg-white opacity-10 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-700"></div>
-          <div class="text-blue-100 text-sm font-medium mb-1">الرصيد المتوفر</div>
+          <div class="text-blue-100 text-sm font-medium mb-1">إجمالي الأرصدة</div>
           <div class="text-3xl font-extrabold tracking-tight" x-text="formatMoney(stats.balance)">0.00</div>
           <div class="mt-4 flex items-center text-xs text-blue-100 bg-white/20 w-fit px-2 py-1 rounded-lg backdrop-blur-sm">
-            <span>مدخرات تراكمية</span>
+            <span>جميع الحسابات</span>
           </div>
         </div>
 
@@ -1539,7 +1724,7 @@
             <div class="w-8 h-8 rounded-full bg-green-50 flex items-center justify-center text-green-600">↓</div>
           </div>
           <div class="text-2xl font-bold text-gray-900" x-text="formatMoney(stats.income)">0.00</div>
-          <div class="mt-2 text-xs text-green-600 font-medium">+12% عن الشهر الماضي</div>
+          <div class="mt-2 text-xs font-medium" x-show="stats.incomeDeltaText" :class="stats.incomeDeltaText.startsWith('-') ? 'text-red-600' : 'text-green-600'" x-text="stats.incomeDeltaText"></div>
         </div>
 
         <!-- Expense Card -->
@@ -1555,16 +1740,17 @@
          <!-- Savings Card -->
          <div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
            <div class="flex items-center justify-between mb-2">
-            <div class="text-gray-500 text-sm font-medium">التوفير</div>
+            <div class="text-gray-500 text-sm font-medium">صافي الشهر</div>
             <div class="w-8 h-8 rounded-full bg-purple-50 flex items-center justify-center text-purple-600">★</div>
           </div>
-          <div class="text-2xl font-bold text-gray-900" x-text="formatMoney(stats.savings)">0.00</div>
-          <div class="mt-2 text-xs text-purple-600 font-medium">ممتاز! واصل التقدم.</div>
+          <div class="text-2xl font-bold" :class="stats.savings >= 0 ? 'text-green-600' : 'text-red-600'" x-text="formatMoney(stats.savings)">0.00</div>
+          <div class="mt-2 text-xs font-medium" :class="stats.savings >= 0 ? 'text-green-600' : 'text-red-600'" x-text="stats.savings >= 0 ? 'ممتاز! واصل التقدم.' : 'تجاوزت المصروفات'"></div>
         </div>
       </div>
 
       <!-- Accounts Summary Section -->
-      <div class="mt-8" x-show="accounts.length > 0">
+      <!-- MOVED TO ACCOUNTS PAGE as requested -->
+      <div class="mt-8" x-show="accounts.length > 0 && false"> <!-- Hidden -->
         <div class="flex items-center justify-between mb-4">
           <h3 class="text-lg font-bold text-gray-800">💳 حساباتي</h3>
           <a href="#" @click.prevent="page = 'accounts'" class="text-sm text-green-600 hover:underline font-medium">إدارة الحسابات</a>
@@ -1580,7 +1766,8 @@
                 </span>
                 <span class="text-xs bg-white/20 px-2 py-1 rounded-full" x-text="account.bank || account.type || 'حساب'"></span>
               </div>
-              <div class="font-bold text-sm truncate mb-2" x-text="account.name">اسم الحساب</div>
+              <div class="font-bold text-sm truncate mb-1" x-text="account.name">اسم الحساب</div>
+              <div class="text-xs opacity-80 font-mono" x-show="account.number" x-text="'•••• ' + String(account.number).slice(-4)"></div>
               <div class="text-lg font-bold" x-text="formatMoney(account.balance || 0)">0.00</div>
               <div x-show="account.lastUpdate" class="text-xs opacity-75 mt-2" x-text="'آخر تحديث: ' + formatDate(account.lastUpdate)"></div>
             </div>
@@ -1603,7 +1790,7 @@
           </div>
           <div class="divide-y divide-gray-50">
              <!-- Loop Transactions -->
-             <template x-for="tx in transactions.slice(0, 10)" :key="tx.id">
+             <template x-for="(tx, txIndex) in transactions.slice(0, 10)" :key="'dash-tx-' + txIndex">
                <div class="flex items-center justify-between p-4 hover:bg-gray-50 transition-colors group cursor-pointer">
                  <div class="flex items-center gap-4">
                    <div class="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-xl shadow-inner group-hover:scale-110 transition-transform">
@@ -1707,20 +1894,27 @@
               <tr>
                 <th class="px-6 py-4 text-right text-xs font-bold text-gray-600 uppercase">التاريخ</th>
                 <th class="px-6 py-4 text-right text-xs font-bold text-gray-600 uppercase">التاجر</th>
+                <th class="px-6 py-4 text-right text-xs font-bold text-gray-600 uppercase">الحساب</th>
                 <th class="px-6 py-4 text-right text-xs font-bold text-gray-600 uppercase">التصنيف</th>
                 <th class="px-6 py-4 text-right text-xs font-bold text-gray-600 uppercase">المبلغ</th>
                 <th class="px-6 py-4 text-center text-xs font-bold text-gray-600 uppercase">الإجراءات</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-50">
-              <template x-for="tx in transactions" :key="tx.id">
+              <template x-for="(tx, txIndex) in transactions" :key="'tx-' + txIndex">
                 <tr class="hover:bg-gray-50 transition-colors">
                   <td class="px-6 py-4 text-sm text-gray-600" x-text="formatDate(tx.date)"></td>
                   <td class="px-6 py-4">
                     <div class="flex items-center gap-3">
                       <span class="text-xl" x-text="getCategoryIcon(tx.category)"></span>
-                      <span class="font-medium text-gray-900" x-text="tx.merchant"></span>
+                      <div>
+                          <div class="font-medium text-gray-900" x-text="tx.merchant"></div>
+                          <div x-show="tx.notes" class="text-xs text-gray-400 truncate max-w-[150px]" x-text="tx.notes"></div>
+                      </div>
                     </div>
+                  </td>
+                  <td class="px-6 py-4 text-sm text-gray-600">
+                      <span x-text="getAccountDisplay(tx.account)" class="px-2 py-1 bg-gray-50 rounded text-xs"></span>
                   </td>
                   <td class="px-6 py-4">
                     <span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-medium" x-text="tx.category"></span>
@@ -2191,9 +2385,14 @@
           <h1 class="text-2xl font-bold text-gray-900">الحسابات البنكية</h1>
           <p class="text-gray-500 text-sm mt-1">إدارة حساباتك وبطاقاتك البنكية</p>
         </div>
-        <button @click="openAccountModal()" class="px-6 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 transition flex items-center gap-2">
-          <span>➕</span> إضافة حساب
-        </button>
+        <div class="flex gap-3">
+          <button @click="showBulkImportModal = true" class="px-4 py-3 bg-purple-600 text-white rounded-xl font-bold hover:bg-purple-700 transition">
+            📥 استيراد SMS
+          </button>
+          <button @click="openAccountModal()" class="px-6 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 transition flex items-center gap-2">
+            <span>➕</span> إضافة حساب
+          </button>
+        </div>
       </header>
       
       <div x-show="accounts.length === 0" class="bg-white rounded-2xl shadow-sm border border-gray-100 p-12 text-center">
@@ -2251,53 +2450,93 @@
   </main>
 
   <!-- Add Transaction Modal -->
-  <div x-show="showAddModal" @click.self="showAddModal = false" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" x-transition>
-    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6" @click.stop>
-      <div class="flex items-center justify-between mb-6">
-        <h2 class="text-xl font-bold text-gray-900">إضافة عملية جديدة</h2>
-        <button @click="showAddModal = false" class="text-gray-400 hover:text-gray-600">✕</button>
+  <div x-show="showAddModal" @click.self="showAddModal = false" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-2 sm:p-4" x-transition>
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[90vh] flex flex-col" @click.stop>
+      <!-- Fixed Header -->
+      <div class="flex items-center justify-between p-4 border-b border-gray-100 flex-shrink-0">
+        <h2 class="text-lg font-bold text-gray-900">إضافة عملية</h2>
+        <button @click="showAddModal = false" class="text-gray-400 hover:text-gray-600 text-xl">✕</button>
       </div>
+
+      <!-- Scrollable Content -->
+      <div class="overflow-y-auto flex-1 p-4">
+        <!-- SMS Paste Area - Always visible for easy bulk input -->
+        <div class="mb-4 p-3 bg-purple-50 rounded-xl border-2 border-dashed border-purple-300">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="text-lg">📱</span>
+            <span class="text-sm font-bold text-purple-700">لصق رسائل SMS (يدعم عدة رسائل)</span>
+          </div>
+          <textarea x-model="rawPasteInput" 
+                    class="w-full h-16 p-2 text-sm border border-purple-200 rounded-lg focus:border-purple-500 focus:ring-0 mb-2 bg-white"
+                    placeholder="الصق رسائل البنك هنا... (افصل بين كل رسالة بسطر فارغ)"></textarea>
+        <button @click="parseRawText()" 
+                :disabled="!rawPasteInput || loadingStates.parsing"
+                class="w-full py-2 bg-purple-600 text-white rounded-lg font-bold hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-2">
+            <span x-show="loadingStates.parsing" class="animate-spin">⌛</span>
+            <span x-text="loadingStates.parsing ? 'جاري التحليل...' : '✨ تحليل بـ Grok'"></span>
+        </button>
+        </div>
       
-      <div class="space-y-4">
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-2">نوع العملية</label>
-          <div class="grid grid-cols-2 gap-3">
-            <button @click="newTransaction.type = 'expense'" :class="newTransaction.type === 'expense' ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-700'" class="px-4 py-3 rounded-lg font-medium transition">
-              💸 مصروف
-            </button>
-            <button @click="newTransaction.type = 'income'" :class="newTransaction.type === 'income' ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-700'" class="px-4 py-3 rounded-lg font-medium transition">
-              💰 دخل
-            </button>
+        <div class="text-center text-xs text-gray-400 mb-2">— أو أدخل يدوياً —</div>
+      
+        <div class="space-y-3">
+          <div>
+            <label class="block text-xs font-medium text-gray-700 mb-1">نوع العملية</label>
+            <div class="grid grid-cols-2 gap-2">
+              <button @click="newTransaction.type = 'expense'" :class="newTransaction.type === 'expense' ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-700'" class="px-3 py-2 rounded-lg text-sm font-medium transition">
+                💸 مصروف
+              </button>
+              <button @click="newTransaction.type = 'income'" :class="newTransaction.type === 'income' ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-700'" class="px-3 py-2 rounded-lg text-sm font-medium transition">
+                💰 دخل
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-xs font-medium text-gray-700 mb-1">الحساب</label>
+              <select x-model="newTransaction.account" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                 <option value="نقدي">نقدي</option>
+                 <template x-for="acc in accounts" :key="acc.name">
+                   <option :value="acc.name" x-text="acc.name"></option>
+                 </template>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-700 mb-1">المبلغ</label>
+              <input type="number" x-model="newTransaction.amount" placeholder="0.00" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+            </div>
+          </div>
+        
+          <div>
+            <label class="block text-xs font-medium text-gray-700 mb-1">التاجر / الوصف</label>
+            <input type="text" x-model="newTransaction.merchant" placeholder="اسم المتجر أو وصف العملية" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+          </div>
+        
+          <div>
+            <label class="block text-xs font-medium text-gray-700 mb-1">التصنيف</label>
+            <select x-model="newTransaction.category" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+              <template x-for="(cat, catIdx) in categoryOptions" :key="'add-cat-' + catIdx">
+                <option :value="cat" x-text="cat"></option>
+              </template>
+            </select>
+          </div>
+
+          <div>
+             <label class="block text-xs font-medium text-gray-700 mb-1">ملاحظات (اختياري)</label>
+             <input type="text" x-model="newTransaction.notes" placeholder="ملاحظات..." class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
           </div>
         </div>
-        
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-2">المبلغ</label>
-          <input type="number" x-model="newTransaction.amount" placeholder="0.00" class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
-        </div>
-        
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-2">التاجر / الوصف</label>
-          <input type="text" x-model="newTransaction.merchant" placeholder="اسم المتجر أو وصف العملية" class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
-        </div>
-        
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-2">التصنيف</label>
-          <select x-model="newTransaction.category" class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
-            <template x-for="cat in categories" :key="cat">
-              <option :value="cat" x-text="cat"></option>
-            </template>
-          </select>
-        </div>
-        
-        <div class="flex gap-3 pt-4">
-          <button @click="showAddModal = false" class="flex-1 px-6 py-3 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition">
-            إلغاء
-          </button>
-          <button @click="addTransaction()" class="flex-1 px-6 py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition">
-            ✓ إضافة
-          </button>
-        </div>
+      </div>
+      
+      <!-- Fixed Footer -->
+      <div class="flex gap-3 p-4 border-t border-gray-100 flex-shrink-0">
+        <button @click="showAddModal = false" class="flex-1 px-4 py-2 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition text-sm">
+          إلغاء
+        </button>
+        <button @click="addTransaction()" class="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition text-sm">
+          ✓ إضافة
+        </button>
       </div>
     </div>
   </div>
@@ -2315,7 +2554,7 @@
           <label class="block text-sm font-medium text-gray-700 mb-2">التصنيف</label>
           <select x-model="newBudget.category" :disabled="editingBudget !== null" class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:bg-gray-100">
             <option value="">اختر التصنيف</option>
-            <template x-for="cat in categories" :key="cat">
+            <template x-for="(cat, catIdx) in categoryOptions" :key="'budget-cat-' + catIdx">
               <option :value="cat" x-text="cat"></option>
             </template>
           </select>
@@ -2385,6 +2624,12 @@
             <option value="محفظة">محفظة إلكترونية</option>
           </select>
         </div>
+
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">الرصيد الحالي</label>
+          <input type="number" step="0.01" x-model="newAccount.balance" placeholder="0.00" class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent" dir="ltr">
+          <p class="text-xs text-gray-500 mt-1">سيتم تحديث الرصيد تلقائياً عند استلام رسائل بنكية جديدة</p>
+        </div>
         
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-2">رقم الحساب / آخر 4 أرقام</label>
@@ -2399,6 +2644,11 @@
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-2">أسماء بديلة (مفصولة بفاصلة)</label>
           <input type="text" x-model="newAccount.aliases" placeholder="الراجحي,alrajhi,alrajhi bank" class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">ملاحظات</label>
+          <textarea x-model="newAccount.notes" placeholder="ملاحظات إضافية عن الحساب" class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent" rows="2"></textarea>
         </div>
         
         <div class="flex gap-4">
@@ -2422,6 +2672,43 @@
           </button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Bulk Import Modal -->
+  <div x-show="showBulkImportModal" @click.self="showBulkImportModal = false" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" x-transition>
+    <div class="bg-white rounded-2xl shadow-2xl max-w-3xl w-full p-6 max-h-[80vh] overflow-y-auto">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-xl font-bold">استيراد مجموعة SMS</h3>
+        <button @click="showBulkImportModal = false" class="text-gray-400 hover:text-gray-600">✕</button>
+      </div>
+      <p class="text-sm text-gray-600 mb-3">الصق رسائل SMS المتعددة (افصل الرسائل بسطر فارغ) ثم اضغط <strong>تحليل</strong>.</p>
+      <textarea x-model="bulkSmsText" rows="6" class="w-full px-4 py-3 border rounded-lg mb-3"></textarea>
+      <div class="flex gap-3 mb-4">
+        <button @click="parseBulkSms()" class="px-4 py-2 bg-purple-600 text-white rounded-lg">🔍 تحليل</button>
+        <button @click="bulkSmsText=''; bulkParseResults=[]" class="px-4 py-2 border rounded-lg">مسح</button>
+        <div x-show="bulkParsing" class="text-sm text-gray-500 ml-2">جاري التحليل...</div>
+      </div>
+      <template x-if="bulkParseResults && bulkParseResults.length">
+        <div>
+          <h4 class="font-bold mb-2">النتائج</h4>
+          <div class="space-y-2">
+            <template x-for="(r, idx) in bulkParseResults" :key="idx">
+              <div class="p-3 border rounded-lg flex items-start gap-3">
+                <input type="checkbox" x-model="r.selected" class="mt-1" />
+                <div class="flex-1">
+                  <div class="text-sm text-gray-700 font-medium" x-text="r.sms"></div>
+                  <div class="text-sm text-gray-500" x-text="r.result && (r.result.error || (r.result.account && r.result.account.name) || JSON.stringify(r.result))"></div>
+                </div>
+              </div>
+            </template>
+          </div>
+          <div class="mt-4 flex justify-end gap-3">
+            <button @click="importSelectedAccounts()" class="px-4 py-2 bg-green-600 text-white rounded-lg">✓ استيراد المحدد</button>
+            <button @click="showBulkImportModal=false" class="px-4 py-2 border rounded-lg">إغلاق</button>
+          </div>
+        </div>
+      </template>
     </div>
   </div>
 
@@ -2451,6 +2738,25 @@
       
       <div class="space-y-4">
         <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">نوع العملية</label>
+          <select x-model="newTransaction.type" class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500">
+            <option value="expense">مصروف</option>
+            <option value="income">دخل</option>
+            <option value="transfer">تحويل</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">الحساب</label>
+          <select x-model="newTransaction.account" class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500">
+            <option value="نقدي">نقدي</option>
+            <template x-for="acc in accounts" :key="'edit-acc-' + acc.name">
+              <option :value="acc.name" x-text="acc.name"></option>
+            </template>
+          </select>
+        </div>
+
+        <div>
           <label class="block text-sm font-medium text-gray-700 mb-2">التاجر *</label>
           <input type="text" x-model="newTransaction.merchant" class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500">
         </div>
@@ -2463,7 +2769,7 @@
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-2">التصنيف</label>
           <select x-model="newTransaction.category" class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500">
-            <template x-for="cat in categories" :key="cat">
+            <template x-for="(cat, catIdx) in categoryOptions" :key="'edit-cat-' + catIdx">
               <option :value="cat" x-text="cat"></option>
             </template>
           </select>
@@ -2545,3 +2851,4 @@
 
 </body>
 </html>
+

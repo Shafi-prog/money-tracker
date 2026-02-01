@@ -15,9 +15,77 @@ function isInternalTransfer_(data) {
   return (cat.indexOf('حوالة داخلية') !== -1) || (typ.indexOf('تحويل داخلي') !== -1);
 }
 
+/** ✅ Smart merchant categorization - NOT using POS as category */
+function categorizeMerchant_(merchant) {
+  var m = String(merchant || '').toLowerCase();
+  
+  // Gas stations / محطات الوقود
+  if (/station|محطة|بنزين|fuel|gas|petrol|نفط|المحطة|statio/i.test(m)) return 'وقود';
+  
+  // Restaurants / مطاعم
+  if (/restaurant|مطعم|كافيه|cafe|coffee|قهوة|ستاربكس|starbucks|ماكدونالد|mcdonald|برجر|burger|بيتزا|pizza|كنتاكي|kfc|شاورما/i.test(m)) return 'طعام';
+  
+  // Grocery / بقالة
+  if (/بقالة|سوبرماركت|supermarket|grocery|تموينات|بندة|danube|تميمي|العثيم|هايبر|carrefour|كارفور|لولو|lulu/i.test(m)) return 'بقالة';
+  
+  // Shopping / تسوق
+  if (/مول|mall|زارا|zara|h&m|سنتر|center|متجر|store|shop/i.test(m)) return 'تسوق';
+  
+  // Telecom / اتصالات
+  if (/stc|موبايلي|mobily|زين|zain|اتصالات|telecom/i.test(m)) return 'اتصالات';
+  
+  // Health / صحة
+  if (/صيدلية|pharmacy|مستشفى|hospital|عيادة|clinic|طبي|medical/i.test(m)) return 'صحة';
+  
+  // Transport / نقل
+  if (/uber|كريم|careem|تاكسي|taxi|نقل|transport/i.test(m)) return 'نقل';
+  
+  // Default
+  return 'مشتريات عامة';
+}
+
 /** Parser احتياطي سريع إذا لم يوجد AI/Templates */
 function parseBasicSMS_(text) {
   var t = String(text || '').replace(/\s+/g, ' ').trim();
+
+  // 0) Manual Command Support (Amount | Merchant | Category | Notes)
+  // Format: "OptionalType: 100 | Merchant | Category | Notes"
+  if (t.indexOf('|') !== -1) {
+    var parts = t.replace(/^(أضف:|Add:)/i, '').split('|').map(function(s) { return s.trim(); });
+    // Expected: [Amount, Merchant, Category, Notes?]
+    if (parts.length >= 2) {
+      var rawAmt = parseFloat(parts[0]);
+      var type = 'مصروفات';
+      var isIncoming = false;
+      
+      // Heuristic: negative amount = expense, positive = income? 
+      // Or explicit type prefix.
+      // Frontend sends "أضف: 100" or "أضف: -100".
+      // Let's rely on sign.
+      if (rawAmt < 0) {
+        type = 'مشتريات';
+        isIncoming = false;
+      } else {
+        type = 'إيداع';
+        isIncoming = true;
+      }
+      
+      var manualCat = parts[2] || 'أخرى';
+      
+      return {
+        merchant: parts[1] || 'يدوي',
+        amount: Math.abs(rawAmt),
+        currency: 'SAR',
+        category: manualCat,
+        type: type,
+        isIncoming: isIncoming,
+        accNum: '',
+        cardNum: '',
+        notes: parts[3] || '', // Capture Notes
+        manual: true
+      };
+    }
+  }
 
   // أنماط متعددة لاستخراج المبلغ
   var amtMatch = t.match(/بـ\s*SAR\s*(\d[\d,\.]*)/i) ||
@@ -45,21 +113,36 @@ function parseBasicSMS_(text) {
   var merchant = merchMatch ? merchMatch[1].trim() : 'غير محدد';
 
   // تحديد النوع والتصنيف
-  var cat = 'أخرى', type = 'حوالة';
+  var cat = 'أخرى', type = 'مشتريات';
   
-  // حوالة داخلية
-  if (/حوالة داخلية/i.test(t)) {
+  // ✅ Check if merchant/destination matches MY OWN ACCOUNTS (not generic banks)
+  var merchantLower = String(merchant || '').toLowerCase();
+  var textLower = String(t || '').toLowerCase();
+  var isInternalTransfer = false;
+  
+  // Get my accounts dynamically from the Accounts sheet
+  var myAccountMatch = classifyAccountFromText_(merchant + ' ' + t);
+  if (myAccountMatch && myAccountMatch.hit && myAccountMatch.hit.isMine === 'TRUE') {
+    // The destination matches one of MY accounts - this is an internal transfer
+    isInternalTransfer = true;
+    Logger.log('🔄 Internal transfer detected - destination matches my account: ' + (myAccountMatch.hit.name || myAccountMatch.hit.number));
+  }
+  
+  // حوالة داخلية (also check explicit Arabic text)
+  if (isInternalTransfer || /حوالة داخلية/i.test(t)) {
     type = 'تحويل داخلي';
-    cat = 'حوالات داخلية';
-    if (/صادر/i.test(t)) { cat = 'حوالات صادرة'; outgoing = true; }
-    if (/وارد/i.test(t)) { cat = 'حوالات واردة'; incoming = true; }
+    cat = 'حوالة داخلية';
+    if (/صادر/i.test(t)) { outgoing = true; }
+    if (/وارد/i.test(t)) { incoming = true; }
   } else if (/(شراء|POS|Apple\s*Pay|مدى)/i.test(t)) {
     type = 'مشتريات';
-    cat = 'مشتريات عامة';
+    // ✅ Don't use POS as category - use smart categorization instead
+    cat = categorizeMerchant_(merchant);
   } else if (incoming) {
     type = 'حوالة';
     cat = 'حوالات واردة';
   } else if (outgoing) {
+    type = 'حوالة';
     cat = 'حوالات صادرة';
   }
 
@@ -139,7 +222,23 @@ function processTransaction(smsText, source, destChatId) {
         var acc = classifyAccountFromText_(smsText, parts.cardLast);
         if (acc && acc.hit) {
           ai.accNum = String(acc.hit.org || '') + (acc.hit.num ? (' ' + acc.hit.num) : '');
+          
+          // Legacy check on Source account (sometimes source is internal if purely moving funds)
           if (acc.isInternal) { ai.category = 'حوالة داخلية'; ai.type = 'تحويل داخلي'; }
+        }
+        
+        // ✅ NEW: Explicit Destination Check (to catch "Transfer to Tiqmo" etc.)
+        // If the merchant text matches one of my accounts, it's an internal transfer.
+        if (ai.merchant && ai.merchant !== 'غير محدد') {
+          var destAcc = classifyAccountFromText_(ai.merchant, null);
+          if (destAcc && destAcc.hit) {
+            if (destAcc.hit.isMine || destAcc.isInternal) {
+              ai.category = 'حوالة داخلية'; 
+              ai.type = 'تحويل داخلي';
+              // Normalize Merchant Name
+              ai.merchant = destAcc.hit.name;
+            }
+          }
         }
       }
       
@@ -154,11 +253,24 @@ function processTransaction(smsText, source, destChatId) {
       Logger.log('Account extraction error: ' + eA);
     }
 
+    // 4.5) Enforce category alignment to known categories
+    try {
+      ai.category = alignCategoryToKnown_(ai.category, ai.type);
+    } catch (eCat) {
+      Logger.log('Category alignment error: ' + eCat);
+    }
+
     // 5) sync - ✅ استخدام نظام UUID الجديد إذا متاح
     var sync;
     if (typeof insertTransaction_ === 'function') {
       sync = insertTransaction_(ai, source, smsText);
     } else {
+      // Pass the extracted current balance to saveTransaction
+      if (ai.currentBalance !== undefined && ai.currentBalance !== null) {
+          if (!ai.extra) ai.extra = {};
+          ai.extra.currentBalance = ai.currentBalance;
+          Logger.log('Passing authoritative balance to saveTransaction: ' + ai.currentBalance);
+      }
       sync = saveTransaction(ai, smsText, source);
     }
 
@@ -179,15 +291,73 @@ function processTransaction(smsText, source, destChatId) {
   }
 }
 
+function alignCategoryToKnown_(category, type) {
+  var raw = String(category || '').trim();
+  if (!raw) raw = 'أخرى';
+
+  // Keep internal transfers mapped to "تحويل"
+  var typ = String(type || '').toLowerCase();
+  var isInternal = /(حوالة داخلية|تحويل داخلي|internal)/i.test(raw) || /(حوالة داخلية|تحويل داخلي|internal)/i.test(typ) || typ === 'transfer';
+  if (isInternal) raw = 'تحويل';
+
+  // Normalize English to Arabic if possible
+  if (typeof _normalizeCategoryNameArabic_ === 'function') {
+    raw = _normalizeCategoryNameArabic_(raw) || raw;
+  }
+
+  var known = getKnownCategories_();
+  if (known.length === 0) return raw || 'أخرى';
+
+  // Prefer cash-withdrawal category when type or text indicates ATM/withdrawal
+  var hasWithdraw = false;
+  for (var k = 0; k < known.length; k++) {
+    if (String(known[k]).trim().toLowerCase() === 'سحب نقدي') { hasWithdraw = true; break; }
+  }
+  if (hasWithdraw) {
+    var isWithdraw = /سحب|صراف|atm|withdraw|cash\s*withdrawal/i.test(raw) || /سحب|صراف|atm|withdraw|cash\s*withdrawal/i.test(typ);
+    if (isWithdraw) return 'سحب نقدي';
+  }
+
+  var lc = raw.toLowerCase();
+  for (var i = 0; i < known.length; i++) {
+    if (String(known[i]).toLowerCase() === lc) return known[i];
+  }
+
+  return 'أخرى';
+}
+
+function getKnownCategories_() {
+  try {
+    // Preferred: UI categories list (handles Arabic/English schema)
+    if (typeof SOV1_UI_getCategories_ === 'function') {
+      var list = SOV1_UI_getCategories_('OPEN');
+      if (list && list.length) return list;
+    }
+
+    // Fallback: CategoryManager schema
+    if (typeof getCategories_ === 'function') {
+      var cats = getCategories_();
+      if (cats && cats.length) {
+        return cats.map(function(c){ return c.name || c; });
+      }
+    }
+  } catch (e) {
+    Logger.log('getKnownCategories_ error: ' + e);
+  }
+  return [];
+}
+
 /** ضمان وجود صف ميزانية للتصنيف (كما كان عندك) */
 function ensureBudgetRowExists_(category) {
-  category = String(category || '').trim();
+  category = (typeof normalizeCategoryForBudget_ === 'function')
+    ? normalizeCategoryForBudget_(category)
+    : String(category || '').trim();
   if (!category) return;
 
   var sB = _sheet('Budgets');
   var vals = sB.getDataRange().getValues();
   for (var i = 1; i < vals.length; i++) {
-    if (String(vals[i][0] || '') === category) return;
+    if (String(vals[i][0] || '').trim().toLowerCase() === String(category).trim().toLowerCase()) return;
   }
 
   var row = sB.getLastRow() + 1;
@@ -233,7 +403,10 @@ function saveTransaction(data, raw, source) {
   };
   
   var merchant = sanitizeString(data.merchant, 100) || 'غير محدد';
-  var category = sanitizeString(data.category, 50) || 'أخرى';
+  var categoryRaw = sanitizeString(data.category, 50) || 'أخرى';
+  var category = (typeof normalizeCategoryForBudget_ === 'function')
+    ? normalizeCategoryForBudget_(categoryRaw)
+    : categoryRaw;
   var type = sanitizeString(data.type, 30) || 'حوالة';
   var accNum = sanitizeString(data.accNum, 20);
   var cardNum = sanitizeString(data.cardNum, 20);
@@ -246,6 +419,34 @@ function saveTransaction(data, raw, source) {
   var sB = _sheet('Budgets');
   var sD = _sheet('Debt_Ledger');
   var sDash = _sheet('Dashboard'); // خام اختياري
+
+  // Detect internal transfer early (before budgets + save)
+  var internal = isInternalTransfer_({ category: categoryRaw, type: type });
+  if (!internal && merchant) {
+    try {
+      var hit = null;
+      if (typeof classifyAccountFromText_ === 'function') {
+        hit = classifyAccountFromText_(merchant, null);
+      }
+      if (!hit && typeof findAccountByNameOrBank_ === 'function') {
+        var found = findAccountByNameOrBank_(merchant);
+        if (found) hit = { hit: found };
+      }
+
+      if (hit && hit.hit && hit.hit.isMine) {
+        var destNum = hit.hit.num || hit.hit.number || '';
+        if (destNum && String(destNum) !== String(accNum)) {
+          internal = true;
+          data.isInternal = true;
+          data.toAccount = destNum;
+          category = 'تحويل داخلي';
+          type = 'تحويل داخلي';
+        }
+      }
+    } catch (eInt) {
+      Logger.log('Internal transfer detection error: ' + eInt);
+    }
+  }
 
   // 1) Sheet1 - with UUID tracking
   s1.appendRow([
@@ -265,7 +466,6 @@ function saveTransaction(data, raw, source) {
   ]);
 
   // 2) Budgets — تجاهل التحويل الداخلي (لا يُحسب مصروف/دخل)
-  var internal = isInternalTransfer_({ category: category, type: type });
   var bRem = 0;
 
   if (!internal) {
@@ -281,7 +481,7 @@ function saveTransaction(data, raw, source) {
         var bData = sB.getDataRange().getValues();
         var rowIdx = -1;
         for (var i = 1; i < bData.length; i++) {
-          if (String(bData[i][0] || '') === category) { rowIdx = i + 1; break; }
+          if (String(bData[i][0] || '').trim().toLowerCase() === String(category).trim().toLowerCase()) { rowIdx = i + 1; break; }
         }
 
         if (rowIdx > 0) {
@@ -317,7 +517,7 @@ function saveTransaction(data, raw, source) {
   try {
     if (internal) {
       // محاولة استخراج الحساب المستلم (للتحويل بين حساباتي)
-      var destAcc = null;
+      var destAcc = data.toAccount || null;
       var rawStr = String(raw || '').toLowerCase();
       
       // 1. Regex (Numbers)
@@ -326,8 +526,8 @@ function saveTransaction(data, raw, source) {
 
       // 2. Name Match (if no digits found)
       if (!destAcc && merchant && typeof findAccountByNameOrBank_ === 'function') {
-         var found = findAccountByNameOrBank_(merchant);
-         if (found && found.isMine) destAcc = found.number;
+        var found = findAccountByNameOrBank_(merchant);
+        if (found && found.isMine) destAcc = found.number || found.num;
       }
       
       // إذا وجدنا حساب مستلم، نعالجه كتحويل داخلي بين الحسابات
@@ -376,7 +576,7 @@ function saveTransaction(data, raw, source) {
   // 5) ✅ تحديث الأرصدة وتتبع الديون (إذا لم يتم تحديثها سابقاً)
   try {
     if (!balancesUpdated && typeof updateBalancesAfterTransaction_ === 'function') {
-      updateBalancesAfterTransaction_({
+      var balancePayload = {
         accNum: accNum,
         cardNum: cardNum,
         merchant: merchant,
@@ -384,7 +584,16 @@ function saveTransaction(data, raw, source) {
         isIncoming: data.isIncoming,
         category: category,
         type: type
-      });
+      };
+      
+      // Pass authoritative balance if available in 'extra'
+      if (data.extra && data.extra.currentBalance !== undefined) {
+          balancePayload.currentBalance = data.extra.currentBalance;
+      } else if (data.currentBalance !== undefined) {
+          balancePayload.currentBalance = data.currentBalance;
+      }
+      
+      updateBalancesAfterTransaction_(balancePayload);
     }
   } catch (eBalance) {
     Logger.log('Balance update error: ' + eBalance.message);

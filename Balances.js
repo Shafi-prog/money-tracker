@@ -13,11 +13,17 @@
 function ensureBalancesSheet_() {
   var sh = _sheet('Accounts');
   if (sh.getLastRow() === 0) {
-    sh.appendRow(['الاسم', 'النوع', 'الرقم', 'البنك', 'الرصيد', 'آخر_تحديث', 'حسابي', 'SMS_Pattern', 'أسماء_بديلة', 'ملاحظات']);
+    sh.appendRow(['الاسم', 'النوع', 'الرقم', 'البنك', 'الرصيد', 'آخر_تحديث', 'حسابي', 'تحويل_داخلي', 'أسماء_بديلة', 'ملاحظات']);
     sh.setFrozenRows(1);
     sh.setRightToLeft(true);
     sh.getRange('E:E').setNumberFormat('#,##0.00');  // الرصيد
     sh.getRange('F:F').setNumberFormat('yyyy-MM-dd HH:mm:ss');  // آخر_تحديث
+  } else {
+    // Fix legacy header if it exists
+    var header = sh.getRange(1, 1, 1, 10).getValues()[0];
+    if (String(header[7] || '') === 'SMS_Pattern') {
+      sh.getRange(1, 8).setValue('تحويل_داخلي');
+    }
   }
   return sh;
 }
@@ -30,22 +36,28 @@ function getAccountInfo_(accountKey) {
   var lastRow = sh.getLastRow();
   if (lastRow < 2) return null;
   
-  // Columns: Name(0), Type(1), Number(2), Bank(3), Balance(4), LastUpdate(5), IsMine(6)
-  var data = sh.getRange(2, 1, lastRow - 1, 7).getValues();
+  // Columns: Name(0), Type(1), Number(2), Bank(3), Balance(4), LastUpdate(5), IsMine(6), IsInternal(7), Aliases(8)
+  var data = sh.getRange(2, 1, lastRow - 1, 9).getValues();
+  var cleanKey = String(accountKey || '').trim().toLowerCase().replace(/^\*/, '');
   
   for (var i = 0; i < data.length; i++) {
-    if (String(data[i][2] || '') === String(accountKey || '')) {
+    var rowNum = String(data[i][2] || '').trim().toLowerCase();
+    var aliases = String(data[i][8] || '').toLowerCase(); // Aliases
+    
+    // Check main number or aliases
+    if (rowNum === cleanKey || aliases.indexOf(cleanKey) >= 0 || aliases.indexOf('*' + cleanKey) >= 0) {
       return {
         row: i + 2,
         name: String(data[i][0]),
         type: String(data[i][1]),
-        number: String(data[i][2]),
+        number: String(data[i][2]), // Return the canonical number (data[i][2])
         bank: String(data[i][3]),
         balance: Number(data[i][4] || 0),
         isMine: String(data[i][6] || '').toUpperCase() === 'TRUE'
       };
     }
   }
+  
   return null;
 }
 
@@ -68,9 +80,10 @@ function setBalance_(accountKey, newBalance) {
     sh.getRange(info.row, 5).setValue(Number(newBalance || 0));
     sh.getRange(info.row, 6).setValue(new Date());
   } else {
-    // Account not found, add it
-    // Default to isMine=TRUE for new accounts unless specified otherwise
-    sh.appendRow(['حساب ' + accountKey, 'حساب', String(accountKey || ''), '', Number(newBalance || 0), new Date(), 'TRUE', '', '', '']);
+    // If account not found in canonical list, DO NOT ADD IT implicitly to avoid duplicating cards as accounts
+    // Just log explicit warning or add to a "Unknown" list if needed
+    // But for this strict request, we ignore or log.
+    Logger.log('⚠️ Attempted to set balance for unknown account: ' + accountKey);
   }
 }
 
@@ -79,10 +92,18 @@ function setBalance_(accountKey, newBalance) {
  * - إذا العملية "صادر" تقلل الرصيد
  * - إذا "وارد" تزيد الرصيد
  */
-function applyTxnToBalance_(accountKey, amount, isIncoming) {
-  var cur = getBalance_(accountKey);
-  var delta = Number(amount||0);
-  var next = isIncoming ? (cur + delta) : (cur - delta);
+// Upgraded calculate logic to support authoritative balance
+function applyTxnToBalance_(accountKey, amount, isIncoming, authoritativeBalance) {
+  var next;
+  if (authoritativeBalance !== undefined && authoritativeBalance !== null) {
+      next = Number(authoritativeBalance);
+      // Logic check: if authoritative balance is wildly different (e.g. 0), maybe ignore?
+      // Assuming parser is correct for now.
+  } else {
+      var cur = getBalance_(accountKey);
+      var delta = Number(amount||0);
+      next = isIncoming ? (cur + delta) : (cur - delta);
+  }
   setBalance_(accountKey, next);
   return next;
 }
@@ -148,6 +169,7 @@ function getAllBalancesHTML_() {
   
   var html = '\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n<b>💳 الأرصدة</b>\n';
   var total = 0;
+  var rows = [];
   
   // Columns: الاسم(0), النوع(1), الرقم(2), البنك(3), الرصيد(4)
   for (var i = 1; i < data.length; i++) {
@@ -159,12 +181,28 @@ function getAllBalancesHTML_() {
     total += balance;
     
     var emoji = balance >= 1000 ? '💚' : (balance >= 0 ? '💛' : '🔴');
-    html += emoji + ' ' + accountName + ': ' + balance.toFixed(0) + '\n';
+    var nameCol = (emoji + ' ' + accountName).slice(0, 18);
+    var balCol = balance.toFixed(0);
+    rows.push(padRight_(nameCol, 18) + ' | ' + padLeft_(balCol, 8));
   }
-  
+  if (rows.length > 0) {
+    html += '<pre>' + rows.join('\n') + '</pre>';
+  }
   html += '<b>💰 ' + total.toFixed(0) + ' SAR</b>';
   
   return html;
+}
+
+function padRight_(txt, len) {
+  txt = String(txt || '');
+  if (txt.length >= len) return txt;
+  return txt + new Array(len - txt.length + 1).join(' ');
+}
+
+function padLeft_(txt, len) {
+  txt = String(txt || '');
+  if (txt.length >= len) return txt;
+  return new Array(len - txt.length + 1).join(' ') + txt;
 }
 
 /**
@@ -173,6 +211,34 @@ function getAllBalancesHTML_() {
 function findAccountByNameOrBank_(text) {
   if (!text) return null;
   text = String(text).toLowerCase().trim();
+
+  // Prefer Accounts sheet (unified schema) if available
+  try {
+    if (typeof ensureAccountsSheet_ === 'function') {
+      var shAcc = ensureAccountsSheet_();
+      var lastAcc = shAcc.getLastRow();
+      if (lastAcc >= 2) {
+        var accRows = shAcc.getRange(2, 1, lastAcc - 1, 10).getValues();
+        for (var a = 0; a < accRows.length; a++) {
+          var accName = String(accRows[a][0] || '').toLowerCase();
+          var accBank = String(accRows[a][3] || '').toLowerCase();
+          var accNum = String(accRows[a][2] || '').trim();
+          var accAliases = String(accRows[a][8] || '').toLowerCase();
+          var accIsMine = String(accRows[a][6] || '').toUpperCase() === 'TRUE';
+
+          if (accName === text || accBank === text || (accAliases && accAliases.indexOf(text) !== -1)) {
+            return {
+              row: a + 2,
+              number: accNum,
+              isMine: accIsMine
+            };
+          }
+        }
+      }
+    }
+  } catch (eAcc) {
+    Logger.log('Accounts lookup failed: ' + eAcc);
+  }
   
   var sh = ensureBalancesSheet_();
   var data = sh.getDataRange().getValues(); // Cache entire sheet
@@ -206,15 +272,17 @@ function updateBalancesAfterTransaction_(data) {
     
     var amount = Number(data.amount) || 0;
     var isIncoming = !!data.isIncoming;
+    var authBalance = (data.currentBalance !== undefined) ? data.currentBalance : null;
     
     // تحديث رصيد الحساب (المصدر)
-    var newBalance = applyTxnToBalance_(accNum, amount, isIncoming);
+    var newBalance = applyTxnToBalance_(accNum, amount, isIncoming, authBalance);
     
     // إرسال إشعار الرصيد للمصدر (فقط إذا كان حسابي)
     var srcInfo = getAccountInfo_(accNum);
-    if (srcInfo && srcInfo.isMine) {
-      sendBalanceUpdateNotification_(accNum, newBalance, data);
-    }
+    // REMOVED redundant notification here because it will be shown in the main report
+    // if (srcInfo && srcInfo.isMine) {
+    //   sendBalanceUpdateNotification_(accNum, newBalance, data);
+    // }
 
     // تتبع الديون (إذا لم يكن تحويل داخلي)
     if (data.merchant && data.merchant !== 'غير محدد') {

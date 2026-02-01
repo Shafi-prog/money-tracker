@@ -26,6 +26,7 @@ function SOV1_setMyCommands_() {
     { command: 'month', description: '🗓️ تقرير الشهر' },
     { command: 'budgets', description: '📋 ملخص الميزانيات' },
     { command: 'balances', description: '💳 أرصدة الحسابات' },
+    { command: 'setbalance', description: '💰 تحديث رصيد: /setbalance رقم الرصيد' },
     { command: 'last', description: '🧾 آخر 5 عمليات' },
     { command: 'search', description: '🔎 بحث: /search كلمة' },
     { command: 'add', description: '➕ إدخال يدوي: /add مبلغ|جهة|تصنيف' },

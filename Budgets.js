@@ -8,8 +8,16 @@
  */
 function SOV1_UI_saveBudget_(category, limit) {
   try {
-    if (!category || !limit) {
-      return { success: false, error: 'التصنيف والحد المطلوبان' };
+    if (!category && category !== 0) {
+      return { success: false, error: 'التصنيف مطلوب' };
+    }
+    var rawLimit = limit;
+    if (typeof normalizeNumber_ === 'function') {
+      rawLimit = normalizeNumber_(rawLimit);
+    }
+    var limitNum = Number(String(rawLimit).replace(/[^0-9.\-]/g, ''));
+    if (isNaN(limitNum)) {
+      return { success: false, error: 'حد الميزانية غير صالح' };
     }
     
     var ss = _ss();
@@ -36,13 +44,13 @@ function SOV1_UI_saveBudget_(category, limit) {
     
     if (found) {
       // Update existing
-      sheet.getRange(row, 2).setValue(Number(limit));
+      sheet.getRange(row, 2).setValue(limitNum);
       // Recalculate remaining
       var spent = Number(sheet.getRange(row, 3).getValue()) || 0;
-      sheet.getRange(row, 4).setValue(Number(limit) - spent);
+      sheet.getRange(row, 4).setValue(limitNum - spent);
     } else {
       // Add new
-      sheet.appendRow([category, Number(limit), 0, Number(limit), 0, 80, '']);
+      sheet.appendRow([category, limitNum, 0, limitNum, 0, 80, '']);
     }
     
     return { success: true, message: 'تم حفظ الميزانية بنجاح' };
@@ -57,8 +65,16 @@ function SOV1_UI_saveBudget_(category, limit) {
  */
 function SOV1_UI_updateBudget_(category, newLimit) {
   try {
-    if (!category || !newLimit) {
-      return { success: false, error: 'التصنيف والحد الجديد مطلوبان' };
+    if (!category && category !== 0) {
+      return { success: false, error: 'التصنيف مطلوب' };
+    }
+    var rawLimit = newLimit;
+    if (typeof normalizeNumber_ === 'function') {
+      rawLimit = normalizeNumber_(rawLimit);
+    }
+    var limitNum = Number(String(rawLimit).replace(/[^0-9.\-]/g, ''));
+    if (isNaN(limitNum)) {
+      return { success: false, error: 'حد الميزانية غير صالح' };
     }
     
     var ss = _ss();
@@ -85,11 +101,11 @@ function SOV1_UI_updateBudget_(category, newLimit) {
     }
     
     // Update limit
-    sheet.getRange(row, 2).setValue(Number(newLimit));
+    sheet.getRange(row, 2).setValue(limitNum);
     
     // Recalculate remaining
     var spent = Number(data[row - 1][2]) || 0;
-    sheet.getRange(row, 4).setValue(Number(newLimit) - spent);
+    sheet.getRange(row, 4).setValue(limitNum - spent);
     
     return { success: true, message: 'تم تحديث الميزانية بنجاح' };
   } catch (e) {

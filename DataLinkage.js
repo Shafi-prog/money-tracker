@@ -130,6 +130,8 @@ function buildAccountsIndex_() {
             name: String(r[0] || ''),              // الاسم
             type: String(r[1] || 'حساب'),          // النوع
             bank: String(r[3] || ''),              // البنك
+            balance: Number(r[4] || 0),            // الرصيد
+            lastUpdate: r[5] ? new Date(r[5]).toISOString() : null, // آخر_تحديث
             aliases: String(r[8] || ''),           // أسماء_بديلة
             isMine: String(r[6] || '').toLowerCase() === 'true',      // حسابي
             isInternal: String(r[7] || '').toLowerCase() === 'true',  // تحويل_داخلي
@@ -375,6 +377,24 @@ function extractToAccountFromText_(text) {
 // ============================================
 
 /**
+ * Get accounts for fast UI (full list with balances)
+ */
+function getAccountsForFastUI_() {
+  try {
+    if (typeof SOV1_UI_getAllAccounts_ === 'function') {
+      return SOV1_UI_getAllAccounts_();
+    }
+  } catch (e) {}
+
+  try {
+    var idx = getAccountsIndex_();
+    return Object.values(idx.byNumber || {});
+  } catch (e) {
+    return [];
+  }
+}
+
+/**
  * Get dashboard data with aggressive caching
  * Reduces backend calls significantly
  */
@@ -390,7 +410,7 @@ function getFastDashboardData_(forceRefresh) {
       kpi: calculateKPI_(),
       recentTransactions: getRecentTransactionsOptimized_(30),
       budgets: getBudgetsOptimized_(),
-      accounts: getAccountsIndex_(),
+      accounts: getAccountsForFastUI_(),
       loadTime: 0
     };
     

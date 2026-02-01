@@ -130,7 +130,7 @@ function cleanupTransactionCategories_() {
     var invalid = [];
 
     for (var row = 1; row < data.length; row++) {
-      var currentCategory = String(data[row][9] || ''); // Category column (J)
+      var currentCategory = String(data[row][10] || ''); // Category column (K)
 
       if (!currentCategory) continue;
 
@@ -156,7 +156,7 @@ function cleanupTransactionCategories_() {
           validCategory = 'أخرى';
         }
 
-        sheet.getRange(row + 1, 10).setValue(validCategory); // Column J
+        sheet.getRange(row + 1, 11).setValue(validCategory); // Column K
         updated++;
       }
     }
@@ -175,6 +175,61 @@ function cleanupTransactionCategories_() {
 
   } catch (e) {
     Logger.log('Error cleaning up categories: ' + e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Repair merchant names if they were overwritten by category cleanup
+ */
+function repairMerchantsFromRaw_() {
+  try {
+    var sheet = _sheet('Sheet1');
+    if (!sheet) return { success: false, error: 'Sheet1 not found' };
+
+    var data = sheet.getDataRange().getValues();
+    var categories = getCategories_();
+    var categorySet = {};
+    for (var i = 0; i < categories.length; i++) {
+      categorySet[String(categories[i].name || '').toLowerCase()] = true;
+    }
+
+    var repaired = 0;
+    var skipped = 0;
+
+    for (var row = 1; row < data.length; row++) {
+      var merchant = String(data[row][9] || '').trim();
+      var raw = String(data[row][12] || '').trim();
+      if (!raw) continue;
+
+      var isCategoryLike = !merchant || merchant === 'أخرى' || categorySet[merchant.toLowerCase()];
+      if (!isCategoryLike) continue;
+
+      var newMerchant = '';
+      if (typeof parseBasicSMS_ === 'function') {
+        try {
+          var parsed = parseBasicSMS_(raw);
+          if (parsed && parsed.merchant) newMerchant = String(parsed.merchant || '').trim();
+        } catch (eP) {}
+      }
+
+      if (!newMerchant) {
+        var m = raw.match(/من\s+(.+?)(?:\n|\s+عبر|\s+في|$)/i) || raw.match(/لدى[:،]?\s*(.+?)(?:\n|\s+عبر|\s+في|$)/i);
+        if (m && m[1]) newMerchant = String(m[1]).trim();
+      }
+
+      if (!newMerchant || categorySet[newMerchant.toLowerCase()]) {
+        skipped++;
+        continue;
+      }
+
+      sheet.getRange(row + 1, 10).setValue(newMerchant); // Merchant column (J)
+      repaired++;
+    }
+
+    return { success: true, repaired: repaired, skipped: skipped };
+  } catch (e) {
+    Logger.log('repairMerchantsFromRaw_ error: ' + e);
     return { success: false, error: e.message };
   }
 }

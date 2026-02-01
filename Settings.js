@@ -10,6 +10,32 @@
  */
 
 /**
+ * Get current user email safely (web app friendly)
+ */
+function getCurrentUserEmail_() {
+  var email = '';
+  try {
+    email = Session.getActiveUser().getEmail() || '';
+  } catch (e1) {}
+  if (!email) {
+    try {
+      email = Session.getEffectiveUser().getEmail() || '';
+    } catch (e2) {}
+  }
+  if (!email) {
+    try {
+      email = PropertiesService.getUserProperties().getProperty('USER_EMAIL') || '';
+    } catch (e3) {}
+  }
+  if (!email) {
+    try {
+      email = PropertiesService.getScriptProperties().getProperty('USER_EMAIL') || '';
+    } catch (e4) {}
+  }
+  return email;
+}
+
+/**
  * Get current settings
  */
 function getSettings() {
@@ -19,7 +45,7 @@ function getSettings() {
     
     const defaultSettings = {
       user_name: '',
-      user_email: Session.getActiveUser().getEmail(),
+      user_email: getCurrentUserEmail_(),
       default_currency: 'USD',
       language: 'ar',
       salary_day: 1,
@@ -32,21 +58,32 @@ function getSettings() {
     // Auto-create Config sheet if missing
     if (!config) {
       config = ss.insertSheet('Config');
+      var currentEmail = getCurrentUserEmail_();
       config.getRange(1, 1, 1, 11).setValues([[
         'Status', 'Name', 'Email', 'Currency', 'Language', 'Salary_Day', 
         'Notifications', 'Auto_Apply_Rules', 'Telegram_Notifications', 'Budget_Alerts', 'Save_Temp_Codes'
       ]]);
       config.getRange(2, 1, 1, 11).setValues([[
-        'ACTIVE', '', Session.getActiveUser().getEmail(), 'SAR', 'ar', 1, 
+        'ACTIVE', '', currentEmail, 'SAR', 'ar', 27, 
         true, true, true, true, false
       ]]);
-      Logger.log('✅ Auto-created Config sheet with defaults');
+      Logger.log('✅ Auto-created Config sheet with defaults, email: ' + currentEmail);
+    }
+    
+    // Ensure email is populated if empty (fix for existing blank emails)
+    var storedEmail = config.getRange('C2').getValue();
+    if (!storedEmail) {
+      var currentEmail = getCurrentUserEmail_();
+      if (currentEmail) {
+        config.getRange('C2').setValue(currentEmail);
+        Logger.log('✅ Auto-filled missing email: ' + currentEmail);
+      }
     }
     
     // Read settings from Config sheet
     const settings = {
       user_name: config.getRange('B2').getValue() || '',
-      user_email: config.getRange('C2').getValue() || Session.getActiveUser().getEmail(),
+      user_email: config.getRange('C2').getValue() || getCurrentUserEmail_(),
       default_currency: config.getRange('D2').getValue() || 'USD',
       language: config.getRange('E2').getValue() || 'ar',
       salary_day: config.getRange('F2').getValue() || 1,
@@ -69,7 +106,7 @@ function getSettings() {
       error: error.message,
       settings: {
         user_name: '',
-        user_email: Session.getActiveUser().getEmail(),
+        user_email: getCurrentUserEmail_(),
         default_currency: 'USD',
         language: 'ar',
         salary_day: 1,
@@ -102,10 +139,10 @@ function saveSettings(settingsData) {
     // Create Config sheet if doesn't exist
     if (!config) {
       config = ss.insertSheet('Config');
-      config.getRange('A1:J1').setValues([
-        ['Status', 'Name', 'Email', 'Currency', 'Language', 'Salary Day', 'Notifications', 'Auto Rules', 'Telegram Notify', 'Budget Alerts']
+      config.getRange('A1:K1').setValues([
+        ['Status', 'Name', 'Email', 'Currency', 'Language', 'Salary Day', 'Notifications', 'Auto Rules', 'Telegram Notify', 'Budget Alerts', 'Save_Temp_Codes']
       ]);
-      config.getRange('A1:J1').setFontWeight('bold');
+      config.getRange('A1:K1').setFontWeight('bold');
       config.setFrozenRows(1);
     }
     
@@ -118,7 +155,7 @@ function saveSettings(settingsData) {
     }
     
     // Save email
-    const userEmail = settingsData.user_email || Session.getActiveUser().getEmail();
+    const userEmail = settingsData.user_email || getCurrentUserEmail_();
     config.getRange('C' + row).setValue(userEmail);
     
     // Save currency
@@ -149,12 +186,16 @@ function saveSettings(settingsData) {
     props.setProperty('DEFAULT_CURRENCY', settingsData.default_currency || 'USD');
     props.setProperty('LANGUAGE', settingsData.language || 'ar');
     props.setProperty('SAVE_TEMP_CODES', settingsData.save_temp_codes ? 'true' : 'false');
+    if (userEmail) {
+      props.setProperty('USER_EMAIL', userEmail);
+      try { PropertiesService.getUserProperties().setProperty('USER_EMAIL', userEmail); } catch (e) {}
+    }
     
     // Mark onboarding as complete
     config.getRange('A' + row).setValue('SETTINGS_SAVED');
     
     // Log the action (Professional pattern)
-    Logger.log('Settings saved successfully by: ' + Session.getActiveUser().getEmail());
+    Logger.log('Settings saved successfully by: ' + (getCurrentUserEmail_() || 'unknown'));
     Logger.log('Settings: ' + JSON.stringify(settingsData));
     
     return {
