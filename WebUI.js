@@ -40,12 +40,17 @@ function SOV1_UI_doGet_(e) {
          result = (typeof DEBUG_TELEGRAM_STATUS === 'function') ? JSON.stringify(DEBUG_TELEGRAM_STATUS()) : "Function DEBUG_TELEGRAM_STATUS not found.";
       } else if (cmd === 'RUN_MASTER_TESTS') {
          result = (typeof RUN_MASTER_TESTS === 'function') ? JSON.stringify(RUN_MASTER_TESTS()) : "Function RUN_MASTER_TESTS not found.";
+      } else if (cmd === 'RUN_FULL_SYSTEM_AUDIT') {
+         result = (typeof RUN_FULL_SYSTEM_AUDIT === 'function') ? JSON.stringify(RUN_FULL_SYSTEM_AUDIT()) : "Function RUN_FULL_SYSTEM_AUDIT not found.";
       } else if (cmd === 'RUN_AUTOMATED_CHECKLIST') {
          result = (typeof RUN_AUTOMATED_CHECKLIST === 'function') ? JSON.stringify(RUN_AUTOMATED_CHECKLIST()) : "Function RUN_AUTOMATED_CHECKLIST not found.";
       } else if (cmd === 'ENSURE_ALL_SHEETS') {
          result = (typeof ENSURE_ALL_SHEETS === 'function') ? JSON.stringify(ENSURE_ALL_SHEETS()) : "Function ENSURE_ALL_SHEETS not found.";
       } else if (cmd === 'CLEAN_CATEGORIES_SHEET') {
          result = (typeof CLEAN_CATEGORIES_SHEET === 'function') ? JSON.stringify(CLEAN_CATEGORIES_SHEET()) : "Function CLEAN_CATEGORIES_SHEET not found.";
+      } else if (cmd === 'FIX_BACKEND_AND_CLEANUP') {
+         // Temporarily calling V3
+         result = (typeof FIX_BACKEND_AND_CLEANUP_V3 === 'function') ? JSON.stringify(FIX_BACKEND_AND_CLEANUP_V3()) : "Function FIX_BACKEND_AND_CLEANUP_V3 not found.";
       } else if (cmd === 'SETUP_BOT_COMMANDS') {
          result = (typeof SETUP_BOT_COMMANDS === 'function') ? JSON.stringify(SETUP_BOT_COMMANDS()) : "Function SETUP_BOT_COMMANDS not found.";
       } else if (cmd === 'CLEAN_SYSTEM_SHEETS') {
@@ -100,6 +105,13 @@ function SOV1_UI_doGet_(e) {
          } else {
            result = "Function SOV1_setupQueueTrigger_ not found.";
          }
+      } else if (cmd === 'SETUP_ALL_TRIGGERS') {
+         if (typeof setupTimeTriggers === 'function') {
+           setupTimeTriggers();
+           result = "All System Triggers Setup Complete (Queue + Reports)";
+         } else {
+           result = "Function setupTimeTriggers not found.";
+         }
       } else if (cmd === 'DELETE_QUEUE_TRIGGER' || cmd === 'REMOVE_QUEUE_TRIGGER') {
          try {
            if (typeof SOV1_deleteQueueTrigger_ === 'function') {
@@ -110,6 +122,369 @@ function SOV1_UI_doGet_(e) {
            }
          } catch (e) {
            result = JSON.stringify({ success: false, error: e.message });
+         }
+      } else if (cmd === 'REPROCESS_TRANSACTIONS') {
+         if (typeof SOV1_REPROCESS_LAST_TRANSACTIONS === 'function') {
+           var count = e.parameter.count || 50;
+           result = JSON.stringify(SOV1_REPROCESS_LAST_TRANSACTIONS(count));
+         } else {
+           result = "Function SOV1_REPROCESS_LAST_TRANSACTIONS not found.";
+         }
+      } else if (cmd === 'REPROCESS_TRANSACTIONS') {
+         if (typeof SOV1_REPROCESS_LAST_TRANSACTIONS === 'function') {
+           var count = e.parameter.count || 20;
+           result = JSON.stringify(SOV1_REPROCESS_LAST_TRANSACTIONS(count));
+         } else {
+           result = "Function SOV1_REPROCESS_LAST_TRANSACTIONS not found.";
+         }  
+      } else if (cmd === 'TEST_SEND_BALANCES') {
+         var cid = e.parameter.chatId; 
+         if (!cid && typeof getHubChatId_ === 'function') cid = getHubChatId_();
+         if (typeof sendAccountsBalanceReport_ === 'function') {
+             sendAccountsBalanceReport_(cid);
+             result = JSON.stringify({ sent: true, chatId: cid });
+         } else {
+             result = JSON.stringify({ error: "sendAccountsBalanceReport_ not found" });
+         }
+      } else if (cmd === 'TEST_SEND_BUDGETS') {
+         var cid = e.parameter.chatId; 
+         if (!cid && typeof getHubChatId_ === 'function') cid = getHubChatId_();
+         if (typeof sendBudgetsSnapshotToTelegram_ === 'function') {
+             sendBudgetsSnapshotToTelegram_(cid);
+             result = JSON.stringify({ sent: true, chatId: cid });
+         } else {
+             result = JSON.stringify({ error: "sendBudgetsSnapshotToTelegram_ not found" });
+         }
+      } else if (cmd === 'SIMULATE_COMMAND') {
+         var cid = e.parameter.chatId; 
+         if (!cid && typeof getHubChatId_ === 'function') cid = getHubChatId_();
+         var text = e.parameter.text || '/start';
+         
+         if (cid && typeof handleTelegramCommand_ === 'function') {
+             var callRes = handleTelegramCommand_(cid, text, {}); // Now captures return value
+             result = JSON.stringify({
+                command: text,
+                chatId: cid,
+                output: callRes
+             });
+         } else {
+             result = "Failed to simulate. ChatID: " + cid + ", Func: " + (typeof handleTelegramCommand_);
+         }
+      } else if (cmd === 'DEDUP_ACCOUNTS') {
+         // Create a dedicated helper to merge duplicate rows in Accounts sheet
+         var sh = _sheet('Accounts');
+         var data = sh.getDataRange().getValues();
+         if (data.length < 2) {
+             result = "No accounts data found.";
+         } else {
+             var headers = data[0];
+             var seen = {};
+             var toDelete = [];
+             var log = [];
+             
+             // Iterate data rows (skip header)
+             // We go from bottom to top to keep the LATEST updated row if we decide to keep one? 
+             // Or top to bottom to keep the first?
+             // Actually, the issue is that "Alrajhi 976" appeared twice. One with 2022, one with 3785.
+             // This suggests we want to KEEP both if they are distinct sub-accounts, but user said "Alrajhi 976" (singular).
+             // But if they have the same "Number" (column 2, index 2), they are technically duplicates in our system unless we support sub-accounts.
+             // The system indexes by Last4 digit. If 2 key collisions occur, one overwrites.
+             // However, balances are calculated per row.
+             // Strategy: Find rows with IDENTICAL Account Number. Merge them?
+             // Actually, let's just REPORT them first, or merge safely (sum balances).
+             
+             for (var i = 1; i < data.length; i++) {
+                 var num = String(data[i][2]); // Number column
+                 var name = String(data[i][0]);
+                 if (!num || num === 'undefined') continue;
+                 
+                 var key = num + "|" + name; // Composite key? Or just Number?
+                 // Let's use Number as primary key for uniqueness test
+                 var uKey = num; 
+                 
+                 if (seen[uKey]) {
+                     // Found duplicate!
+                     var originalIdx = seen[uKey];
+                     var originalBal = Number(data[originalIdx][4] || 0); // Balance Col 4
+                     var dupBal = Number(data[i][4] || 0);
+                     
+                     // Merge balance into original
+                     data[originalIdx][4] = originalBal + dupBal;
+                     log.push("Merged duplicate for " + uKey + ": Row " + (i+1) + " (" + dupBal + ") into Row " + (originalIdx+1));
+                     toDelete.push(i + 1); // Store 1-based Row Index
+                 } else {
+                     seen[uKey] = i;
+                 }
+             }
+             
+             // Perform updates
+             // 1. Update balances for preserved rows
+             // 2. Delete duplicate rows (in reverse order to preserve indices)
+             
+             if (toDelete.length > 0) {
+                 // Write back the merged balances FIRST
+                 // Better: just write the whole array back? No, delete rows shifts things.
+                 // Let's just update the specific cells of the 'keepers' first.
+                 Object.keys(seen).forEach(function(k) {
+                     var idx = seen[k];
+                     var bal = data[idx][4];
+                     sh.getRange(idx + 1, 5).setValue(bal); // Col 5 is Balance
+                 });
+                 
+                 // Sort descending
+                 toDelete.sort(function(a, b) { return b - a; });
+                 toDelete.forEach(function(r) {
+                     sh.deleteRow(r);
+                 });
+                 result = "Deduplicated " + toDelete.length + " accounts.\n" + log.join("\n");
+             } else {
+                result = "No exact duplicates found based on Account Number.";
+             }
+         }
+
+      } else if (cmd === 'DEBUG_SHEETS_LIST') {
+         var ss = SpreadsheetApp.getActiveSpreadsheet();
+         var sheets = ss.getSheets();
+         var names = sheets.map(function(s) { return s.getName() + " (" + s.getLastRow() + " rows)"; });
+         result = JSON.stringify(names);
+
+      } else if (cmd === 'FIX_ACCOUNT_BALANCE') {
+         var accNum = e.parameter.num;
+         var newBal = e.parameter.bal;
+         if (typeof setBalance_ === 'function') {
+             setBalance_(accNum, newBal);
+             result = "Set balance of " + accNum + " to " + newBal;
+         } else {
+             result = "setBalance_ not found";
+         }
+
+      } else if (cmd === 'MERGE_ACCOUNTS') {
+         var keepNum = String(e.parameter.keep).trim();
+         var mergeNum = String(e.parameter.merge).trim();
+         
+         if (!keepNum || !mergeNum) {
+             result = "Missing keep or merge parameters";
+         } else {
+             var sh = _sheet('Accounts');
+             var data = sh.getDataRange().getValues();
+             var keepIdx = -1;
+             var mergeIdx = -1;
+             
+             for (var i = 1; i < data.length; i++) {
+                 var rNum = String(data[i][2]);
+                 if (rNum === keepNum) keepIdx = i;
+                 if (rNum === mergeNum) mergeIdx = i;
+             }
+             
+             if (keepIdx === -1 || mergeIdx === -1) {
+                 result = "Could not find both accounts. Keep:" + keepIdx + " Merge:" + mergeIdx;
+             } else {
+                 // 1. Add alias
+                 var currentAliases = String(data[keepIdx][8] || '');
+                 // Check if already in alias to avoid spam
+                 if (currentAliases.indexOf(mergeNum) === -1) {
+                    if (currentAliases) currentAliases += ',';
+                    currentAliases += mergeNum;
+                    sh.getRange(keepIdx + 1, 9).setValue(currentAliases); // Col 9 is Aliases (Index 8)
+                 }
+                 
+                 // 2. Delete merge row
+                 sh.deleteRow(mergeIdx + 1);
+                 
+                 result = "Merged " + mergeNum + " into " + keepNum + ". Alias added.";
+             }
+         }
+
+      } else if (cmd === 'ADD_ACCOUNT') {
+         var sh = _sheet('Accounts');
+         var name = e.parameter.name || '';
+         var type = e.parameter.type || 'بنك';
+         var num = e.parameter.num || '';
+         var bank = e.parameter.bank || '';
+         var bal = Number(e.parameter.bal) || 0;
+         var isMine = e.parameter.isMine !== 'false';
+         
+         sh.appendRow([name, type, num, bank, bal, new Date(), isMine ? 'TRUE' : 'FALSE', '', '', '', 0]);
+         result = "Added account: " + name + " (" + num + ") with balance " + bal;
+
+      } else if (cmd === 'REMOVE_ALIAS') {
+         var sh = _sheet('Accounts');
+         var data = sh.getDataRange().getValues();
+         var accNum = e.parameter.num;
+         var aliasToRemove = e.parameter.alias;
+         
+         for (var i = 1; i < data.length; i++) {
+             if (String(data[i][2]) === accNum) {
+                 var aliases = String(data[i][8] || '');
+                 var aliasList = aliases.split(',').filter(function(a) { return a.trim() !== aliasToRemove; });
+                 sh.getRange(i + 1, 9).setValue(aliasList.join(','));
+                 result = "Removed alias " + aliasToRemove + " from " + accNum;
+                 break;
+             }
+         }
+         if (!result) result = "Account not found: " + accNum;
+
+      } else if (cmd === 'DEBUG_INGRESS_LOGS') {
+         var sh = _sheet('Ingress_Debug');
+         var data = sh.getDataRange().getValues();
+         var logs = [];
+         // Get last 20 entries
+         for (var i = Math.max(1, data.length - 20); i < data.length; i++) {
+           logs.push({
+             row: i + 1,
+             timestamp: data[i][0],
+             level: data[i][1],
+             function: data[i][2],
+             details: data[i][3],
+             message: data[i][4]
+           });
+         }
+         result = JSON.stringify(logs);
+
+      } else if (cmd === 'DEBUG_QUEUE_STATUS') {
+         try {
+           var sh = _sheet('Ingress_Queue');
+           var data = sh.getDataRange().getValues();
+           var queue = [];
+           // Get last 20 entries
+           for (var i = Math.max(1, data.length - 20); i < data.length; i++) {
+             queue.push({
+               row: i + 1,
+               timestamp: data[i][0],
+               source: data[i][1],
+               text: String(data[i][2] || '').slice(0, 100),
+               status: data[i][4],
+               fingerprint: data[i][5]
+             });
+           }
+           result = JSON.stringify({ success: true, queue: queue });
+         } catch (e) {
+           result = JSON.stringify({ success: false, error: e.message });
+         }
+
+      } else if (cmd === 'PROCESS_QUEUE') {
+         try {
+           if (typeof SOV1_processQueueBatch_ === 'function') {
+             SOV1_processQueueBatch_();
+             result = JSON.stringify({ success: true, message: 'Queue processing triggered' });
+           } else {
+             result = JSON.stringify({ success: false, error: 'SOV1_processQueueBatch_ function not found' });
+           }
+         } catch (e) {
+           result = JSON.stringify({ success: false, error: e.message });
+         }
+
+      } else if (cmd === 'DEBUG_SHEET_STRUCTURE') {
+         var ss = SpreadsheetApp.getActiveSpreadsheet();
+         var sheets = ss.getSheets();
+         var structure = [];
+         
+         sheets.forEach(function(s) {
+           var name = s.getName();
+           var lastCol = s.getLastColumn();
+           var headers = [];
+           if (lastCol > 0) {
+             headers = s.getRange(1, 1, 1, lastCol).getValues()[0];
+           }
+           structure.push({
+             name: name,
+             headers: headers
+           });
+         });
+         
+         result = JSON.stringify(structure);
+
+      } else if (cmd === 'FIX_CONFIG_SHEET') {
+         var ss = SpreadsheetApp.getActiveSpreadsheet();
+         var config = ss.getSheetByName('Config');
+         if (!config) {
+             config = ss.insertSheet('Config');
+         }
+         
+         // Force set headers to A1:K1
+         config.getRange('A1:K1').setValues([
+             ['Status', 'Name', 'Email', 'Currency', 'Language', 'Salary_Day', 'Notifications', 'Auto_Apply_Rules', 'Telegram_Notifications', 'Budget_Alerts', 'Save_Temp_Codes']
+         ]);
+         config.getRange('A1:K1').setFontWeight('bold');
+         config.setFrozenRows(1);
+         
+         result = JSON.stringify({
+             success: true, 
+             message: "Config sheet headers fixed. Added 'Save_Temp_Codes' to column K."
+         });
+
+      } else if (cmd === 'DEBUG_UI_SYNC') {
+         var syncResult = {};
+         
+         try {
+           syncResult.categories = (typeof SOV1_UI_getCategories === 'function') ? SOV1_UI_getCategories('OPEN') : "MISSING";
+         } catch(e) { syncResult.categories = "ERROR: " + e.message; }
+         
+         try {
+           syncResult.settings = (typeof SOV1_UI_getSettings === 'function') ? SOV1_UI_getSettings() : "MISSING";
+         } catch(e) { syncResult.settings = "ERROR: " + e.message; }
+         
+         try {
+           syncResult.fastDashboard = (typeof SOV1_FAST_getDashboard === 'function') ? SOV1_FAST_getDashboard() : "MISSING";
+         } catch(e) { syncResult.fastDashboard = "ERROR: " + e.message; }
+         
+         result = JSON.stringify(syncResult);
+
+      } else if (cmd === 'DEBUG_ACCOUNTS_DUMP') {
+         var sh = _sheet('Accounts');
+         var data = sh.getDataRange().getValues();
+         var accounts = [];
+         for (var i = 1; i < data.length; i++) {
+           accounts.push({
+             row: i + 1,
+             name: String(data[i][0]),
+             number: String(data[i][2]),
+             bank: String(data[i][3]),
+             balance: data[i][4]
+           });
+         }
+         result = JSON.stringify(accounts);
+
+      } else if (cmd === 'GET_RAW_SMS_FOR_DEBUG') {
+         var sheet = _sheet('Sheet1');
+         var data = sheet.getDataRange().getValues();
+         var samples = [];
+         // Get last 10
+         for (var i = Math.max(1, data.length - 10); i < data.length; i++) {
+            samples.push({
+               row: i+1,
+               merchant: data[i][9],
+               category: data[i][10],
+               raw: data[i][12]
+            });
+         }
+         result = JSON.stringify(samples);
+      } else if (cmd === 'UPDATE_CATEGORIES') {
+         if (typeof ensureCategoriesSheet_ === 'function') {
+           var sheet = ensureCategoriesSheet_();
+           var data = sheet.getDataRange().getValues();
+           var existing = [];
+           for (var i=1; i<data.length; i++) existing.push(data[i][1]); // Name column
+           
+           var needed = ['بقالة', 'وقود', 'مشتريات عامة', 'نقل', 'تسوق', 'طعام', 'فواتير', 'صحة'];
+           var added = 0;
+           
+           needed.forEach(function(n) {
+             if (existing.indexOf(n) === -1) {
+               sheet.appendRow([n.toLowerCase(), n, '', 'expense', '✨', '#888888', 'Category added via Update', true]);
+               added++;
+             }
+           });
+           
+           result = JSON.stringify({ success: true, added: added, total: data.length + added });
+         } else {
+           result = "Function ensureCategoriesSheet_ not found.";
+         }
+      } else if (cmd === 'AUDIT_SYSTEM') {
+         if (typeof AUDIT_SYSTEM_HEALTH === 'function') {
+           result = JSON.stringify(AUDIT_SYSTEM_HEALTH());
+         } else {
+           result = "Function AUDIT_SYSTEM_HEALTH not found.";
          }
       } else if (cmd === 'CLEAN_TEST_BY_YEAR') {
          // Safe cleanup for test data by year
@@ -195,6 +570,83 @@ function SOV1_UI_doGet_(e) {
          } catch (ex) {
            result = 'Error executing SEND_TEST_TELEGRAM: ' + ex.message;
          }
+      } else if (cmd === 'REBUILD_BALANCES') {
+         try {
+           // Just rebuild from existing opening balances - DON'T overwrite them
+           if (typeof rebuildBalancesFromHistory === 'function') {
+              var rebuildResult = rebuildBalancesFromHistory();
+              result = JSON.stringify({ status: 'Rebuilt from manual opening balances', details: rebuildResult });
+           } else {
+              result = JSON.stringify({ error: "rebuildBalancesFromHistory not found" });
+           }
+         } catch (ex) { result = "Error executing REBUILD_BALANCES: " + ex.message; }
+      } else if (cmd === 'CALIBRATE_BALANCES') {
+         // NEW: Separate command for full calibration (overwrites openings)
+         try {
+           if (typeof CALIBRATE_BALANCES_MASTER === 'function') {
+              var calibration = CALIBRATE_BALANCES_MASTER();
+              result = JSON.stringify(calibration);
+           } else {
+              result = JSON.stringify({ error: "CALIBRATE_BALANCES_MASTER not found" });
+           }
+         } catch (ex) { result = "Error executing CALIBRATE_BALANCES: " + ex.message; }
+      } else if (cmd === 'GET_CALCULATED_BALANCES') {
+         try {
+           result = (typeof GET_CALCULATED_BALANCES === 'function') ? JSON.stringify(GET_CALCULATED_BALANCES()) : "Function GET_CALCULATED_BALANCES not found.";
+         } catch (ex) { result = "Error: " + ex.message; }
+      } else if (cmd === 'CLEAR_ALL_TRANSACTIONS') {
+         try {
+           var s1 = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Sheet1');
+           if (s1 && s1.getLastRow() > 1) {
+              s1.deleteRows(2, s1.getLastRow() - 1);
+              result = JSON.stringify({ success: true, message: 'All transactions cleared' });
+           } else {
+              result = JSON.stringify({ success: true, message: 'No transactions to clear' });
+           }
+         } catch (ex) { result = "Error: " + ex.message; }
+      } else if (cmd === 'SYNC_BALANCES_TO_OPENING') {
+         // Set current Balance = Opening Balance (for fresh start)
+         try {
+           var accSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Accounts');
+           if (!accSheet || accSheet.getLastRow() < 2) {
+              result = JSON.stringify({ success: false, error: 'No accounts' });
+           } else {
+              var lastRow = accSheet.getLastRow();
+              var openings = accSheet.getRange(2, 11, lastRow - 1, 1).getValues(); // Column K = Opening
+              var now = new Date();
+              var balances = [];
+              var dates = [];
+              for (var i = 0; i < openings.length; i++) {
+                balances.push([Number(openings[i][0] || 0)]);
+                dates.push([now]);
+              }
+              accSheet.getRange(2, 5, lastRow - 1, 1).setValues(balances);  // Column E = Balance
+              accSheet.getRange(2, 6, lastRow - 1, 1).setValues(dates);     // Column F = LastUpdate
+              result = JSON.stringify({ success: true, synced: lastRow - 1 });
+           }
+         } catch (ex) { result = "Error: " + ex.message; }
+      } else if (cmd === 'SET_ACCOUNT_BALANCE') {
+         // Set balance for a specific account
+         try {
+           var accountNum = e.parameter.accountNum || '';
+           var newBalance = Number(e.parameter.balance || 0);
+           var accSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Accounts');
+           if (!accSheet || accSheet.getLastRow() < 2) {
+              result = JSON.stringify({ success: false, error: 'No accounts' });
+           } else {
+              var data = accSheet.getRange(2, 3, accSheet.getLastRow() - 1, 1).getValues();
+              var found = false;
+              for (var i = 0; i < data.length; i++) {
+                if (String(data[i][0]) === String(accountNum)) {
+                  accSheet.getRange(i + 2, 5).setValue(newBalance);
+                  accSheet.getRange(i + 2, 6).setValue(new Date());
+                  found = true;
+                  break;
+                }
+              }
+              result = found ? JSON.stringify({ success: true, account: accountNum, balance: newBalance }) : JSON.stringify({ success: false, error: 'Account not found' });
+           }
+         } catch (ex) { result = "Error: " + ex.message; }
       } else if (cmd === 'DUMP_INGRESS_DEBUG') {
          try {
            var n = Number(e.parameter.n || 20) || 20;
@@ -204,10 +656,30 @@ function SOV1_UI_doGet_(e) {
          try {
            result = (typeof SOV1_UI_getAccounts_ === 'function') ? JSON.stringify({ success: true, accounts: SOV1_UI_getAccounts_() }) : "Function SOV1_UI_getAccounts_ not found.";
          } catch (ex) { result = "Error executing DUMP_ACCOUNTS: " + ex.message; }
+      } else if (cmd === 'UPDATE_ACCOUNT_ALIASES') {
+         try {
+           var accountNum = e.parameter.accountNum || '';
+           var aliases = e.parameter.aliases || '';
+           result = (typeof UPDATE_ACCOUNT_ALIASES === 'function') ? JSON.stringify(UPDATE_ACCOUNT_ALIASES(accountNum, aliases)) : "Function UPDATE_ACCOUNT_ALIASES not found.";
+         } catch (ex) { result = "Error executing UPDATE_ACCOUNT_ALIASES: " + ex.message; }
       } else if (cmd === 'DUMP_ACCOUNT_BALANCES') {
          try {
            result = (typeof SOV1_UI_getAccountsWithBalances_ === 'function') ? JSON.stringify({ success: true, balances: SOV1_UI_getAccountsWithBalances_() }) : "Function SOV1_UI_getAccountsWithBalances_ not found.";
          } catch (ex) { result = "Error executing DUMP_ACCOUNT_BALANCES: " + ex.message; }
+      } else if (cmd === 'DUMP_ACCOUNTS_RAW') {
+         // Dump raw accounts sheet data including Opening Balance
+         try {
+           var accSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Accounts');
+           if (!accSheet || accSheet.getLastRow() < 2) {
+             result = JSON.stringify({ success: false, error: 'No accounts' });
+           } else {
+             var data = accSheet.getRange(2, 1, accSheet.getLastRow()-1, 11).getValues();
+             var accounts = data.map(function(r) {
+               return { name: r[0], type: r[1], num: r[2], bank: r[3], balance: r[4], lastUpdate: r[5], isMine: r[6], isInternal: r[7], aliases: r[8], notes: r[9], openingBalance: r[10] };
+             });
+             result = JSON.stringify({ success: true, accounts: accounts });
+           }
+         } catch (ex) { result = "Error: " + ex.message; }
       } else if (cmd === 'CLEAN_ACCOUNTS_AUTOFIX') {
          try {
            result = (typeof CLEAN_ACCOUNTS_AUTOFIX_ === 'function') ? JSON.stringify(CLEAN_ACCOUNTS_AUTOFIX_()) : "Function CLEAN_ACCOUNTS_AUTOFIX_ not found.";
@@ -216,6 +688,11 @@ function SOV1_UI_doGet_(e) {
          try {
            result = (typeof RESET_ACCOUNTS_CANONICAL_ === 'function') ? JSON.stringify(RESET_ACCOUNTS_CANONICAL_()) : "Function RESET_ACCOUNTS_CANONICAL_ not found.";
          } catch (ex) { result = "Error executing RESET_ACCOUNTS_CANONICAL: " + ex.message; }
+      } else if (cmd === 'SET_OPENING_BALANCES') {
+         // Force Push Check
+         try {
+           result = (typeof SET_OPENING_BALANCES_FROM_CLI === 'function') ? JSON.stringify(SET_OPENING_BALANCES_FROM_CLI()) : "Function SET_OPENING_BALANCES_FROM_CLI not found.";
+         } catch (ex) { result = "Error executing SET_OPENING_BALANCES: " + ex.message; }
       } else if (cmd === 'TEST_ADD_ACCOUNT') {
          try {
            var name = e.parameter.name || 'CLI Test Account';
@@ -320,6 +797,114 @@ function SOV1_UI_doGet_(e) {
            var keep = e.parameter.keep ? String(e.parameter.keep).split(',') : null;
            result = (typeof SOV1_enforceTriggers_ === 'function') ? JSON.stringify(SOV1_enforceTriggers_(keep)) : "Function SOV1_enforceTriggers_ not found.";
          } catch (e) { result = "Error executing ENFORCE_TRIGGERS: " + e.message; }
+      } else if (cmd === 'RECATEGORIZE_OTHER') {
+         // Re-categorize transactions marked as "أخرى" using Grok AI
+         try {
+           var limit = Number(e.parameter.limit || 50);
+           var dryRun = (e.parameter.dryRun === 'true' || e.parameter.dry === 'true');
+           result = (typeof recategorizeOtherTransactions_ === 'function') 
+             ? JSON.stringify(recategorizeOtherTransactions_(limit, dryRun)) 
+             : "Function recategorizeOtherTransactions_ not found.";
+         } catch (ex) { result = "Error executing RECATEGORIZE_OTHER: " + ex.message; }
+      } else if (cmd === 'AUDIT_CATEGORIES') {
+         // Audit all transactions to find miscategorized ones
+         try {
+           result = (typeof auditTransactionCategories_ === 'function') 
+             ? JSON.stringify(auditTransactionCategories_()) 
+             : "Function auditTransactionCategories_ not found.";
+         } catch (ex) { result = "Error executing AUDIT_CATEGORIES: " + ex.message; }
+      } else if (cmd === 'VIEW_MERCHANT_MEMORY') {
+         // View learned merchant->category mappings
+         try {
+           if (typeof getMerchantMemory_ === 'function') {
+             var memory = getMerchantMemory_();
+             var count = Object.keys(memory).length;
+             result = JSON.stringify({ 
+               success: true, 
+               count: count, 
+               merchants: memory,
+               note: 'Grok uses this to remember category for repeat merchants'
+             });
+           } else {
+             result = JSON.stringify({ success: false, error: "getMerchantMemory_ not found" });
+           }
+         } catch (ex) { result = "Error: " + ex.message; }
+      } else if (cmd === 'CLEAR_MERCHANT_MEMORY') {
+         // Clear the merchant memory cache (forces rebuild on next classification)
+         try {
+           if (typeof clearMerchantMemoryCache_ === 'function') {
+             clearMerchantMemoryCache_();
+             result = JSON.stringify({ success: true, message: "Merchant memory cache cleared. Will rebuild from transactions on next use." });
+           } else {
+             result = JSON.stringify({ success: false, error: "clearMerchantMemoryCache_ not found" });
+           }
+         } catch (ex) { result = "Error: " + ex.message; }
+      } else if (cmd === 'TEST_MERCHANT_LOOKUP') {
+         // Test merchant lookup without calling AI
+         try {
+           var merchant = e.parameter.merchant ? decodeURIComponent(e.parameter.merchant) : '';
+           if (!merchant) {
+             result = JSON.stringify({ success: false, error: "Missing 'merchant' parameter" });
+           } else if (typeof lookupMerchantCategory_ === 'function') {
+             var found = lookupMerchantCategory_(merchant);
+             result = JSON.stringify({ 
+               success: true, 
+               merchant: merchant,
+               foundCategory: found,
+               note: found ? 'Category found from past transactions' : 'No match - will use AI'
+             });
+           } else {
+             result = JSON.stringify({ success: false, error: "lookupMerchantCategory_ not found" });
+           }
+         } catch (ex) { result = "Error: " + ex.message; }
+      } else if (cmd === 'VIEW_BANK_FORMATS') {
+         // View learned bank SMS formats
+         try {
+           if (typeof getBankFormatMemory_ === 'function') {
+             var bankMemory = getBankFormatMemory_();
+             result = JSON.stringify({ 
+               success: true, 
+               totalTransactions: bankMemory.total,
+               banks: bankMemory.banks,
+               note: 'Grok learns SMS format patterns from each bank'
+             });
+           } else {
+             result = JSON.stringify({ success: false, error: "getBankFormatMemory_ not found" });
+           }
+         } catch (ex) { result = "Error: " + ex.message; }
+      } else if (cmd === 'VIEW_SMS_LEARNING') {
+         // View the full SMS learning context that gets sent to AI
+         try {
+           if (typeof getSMSLearningContext_ === 'function') {
+             var context = getSMSLearningContext_();
+             result = JSON.stringify({ 
+               success: true, 
+               learningContext: context,
+               contextLength: context.length,
+               note: 'This context is included in every AI call to help Grok learn from your transaction history'
+             });
+           } else {
+             result = JSON.stringify({ success: false, error: "getSMSLearningContext_ not found" });
+           }
+         } catch (ex) { result = "Error: " + ex.message; }
+      } else if (cmd === 'DETECT_BANK') {
+         // Test bank detection from SMS text
+         try {
+           var smsText = e.parameter.sms ? decodeURIComponent(e.parameter.sms) : '';
+           if (!smsText) {
+             result = JSON.stringify({ success: false, error: "Missing 'sms' parameter" });
+           } else if (typeof detectBankFromSMS_ === 'function') {
+             var bank = detectBankFromSMS_(smsText);
+             result = JSON.stringify({ 
+               success: true, 
+               sms: smsText.substring(0, 100) + (smsText.length > 100 ? '...' : ''),
+               detectedBank: bank || 'Unknown',
+               note: bank ? 'Bank detected from SMS patterns' : 'Could not identify bank'
+             });
+           } else {
+             result = JSON.stringify({ success: false, error: "detectBankFromSMS_ not found" });
+           }
+         } catch (ex) { result = "Error: " + ex.message; }
       } else {
         result = "Unknown command: " + cmd;
       }
@@ -3342,4 +3927,276 @@ function SOV1_CLEAN_TEST_CATEGORIES() {
     Logger.log('Error in SOV1_CLEAN_TEST_CATEGORIES: ' + e);
     return { success: false, error: e.message };
   }
+}
+
+// ============================================================================
+// CATEGORY AUDIT & RE-CATEGORIZATION FUNCTIONS
+// ============================================================================
+
+/**
+ * Audit all transactions to find category issues
+ * Returns summary of categories and potential problems
+ */
+function auditTransactionCategories_() {
+  try {
+    var sheet = _sheet('Sheet1');
+    if (!sheet || sheet.getLastRow() < 2) {
+      return { success: true, message: 'No transactions found', stats: {} };
+    }
+    
+    var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 13).getValues();
+    var stats = {
+      total: 0,
+      byCategory: {},
+      otherCategory: [],
+      emptyCategory: [],
+      potentialMiscategorized: []
+    };
+    
+    // Get known categories for validation
+    var knownCategories = [];
+    if (typeof getKnownCategories_ === 'function') {
+      knownCategories = getKnownCategories_();
+    }
+    var knownLower = knownCategories.map(function(c) { return String(c).toLowerCase(); });
+    
+    for (var i = 0; i < data.length; i++) {
+      var row = data[i];
+      var uuid = row[0];
+      var date = row[1];
+      var merchant = String(row[9] || '');
+      var category = String(row[10] || '');
+      var amount = Number(row[8] || 0);
+      
+      stats.total++;
+      
+      // Count by category
+      if (!stats.byCategory[category]) stats.byCategory[category] = 0;
+      stats.byCategory[category]++;
+      
+      // Track "أخرى" or empty
+      if (!category || category.trim() === '') {
+        stats.emptyCategory.push({ row: i + 2, uuid: uuid, merchant: merchant, amount: amount });
+      } else if (category === 'أخرى' || category.toLowerCase() === 'other' || category === 'POS') {
+        stats.otherCategory.push({ row: i + 2, uuid: uuid, merchant: merchant, amount: amount, date: date });
+      }
+      
+      // Check if category looks wrong based on merchant
+      var potentialCat = detectCategoryFromMerchantAudit_(merchant);
+      if (potentialCat && potentialCat !== category && category !== 'أخرى') {
+        stats.potentialMiscategorized.push({
+          row: i + 2,
+          uuid: uuid,
+          merchant: merchant,
+          currentCategory: category,
+          suggestedCategory: potentialCat
+        });
+      }
+    }
+    
+    return {
+      success: true,
+      stats: {
+        total: stats.total,
+        categories: stats.byCategory,
+        otherCount: stats.otherCategory.length,
+        emptyCount: stats.emptyCategory.length,
+        potentialIssues: stats.potentialMiscategorized.length
+      },
+      otherTransactions: stats.otherCategory.slice(0, 20), // First 20 for review
+      potentialMiscategorized: stats.potentialMiscategorized.slice(0, 10)
+    };
+  } catch (e) {
+    Logger.log('Error in auditTransactionCategories_: ' + e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Re-categorize transactions marked as "أخرى" using AI
+ * @param {number} limit - Max transactions to process (default 50)
+ * @param {boolean} dryRun - If true, only report what would change without saving
+ */
+function recategorizeOtherTransactions_(limit, dryRun) {
+  try {
+    limit = Number(limit) || 50;
+    dryRun = !!dryRun;
+    
+    var sheet = _sheet('Sheet1');
+    if (!sheet || sheet.getLastRow() < 2) {
+      return { success: true, message: 'No transactions found', processed: 0 };
+    }
+    
+    var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 13).getValues();
+    var results = {
+      processed: 0,
+      updated: 0,
+      skipped: 0,
+      errors: 0,
+      changes: []
+    };
+    
+    for (var i = 0; i < data.length && results.processed < limit; i++) {
+      var row = data[i];
+      var category = String(row[10] || '');
+      
+      // Only process "أخرى", "other", "POS", or empty categories
+      if (category !== 'أخرى' && category.toLowerCase() !== 'other' && 
+          category !== 'POS' && category.trim() !== '') {
+        continue;
+      }
+      
+      results.processed++;
+      
+      var uuid = row[0];
+      var merchant = String(row[9] || '');
+      var amount = Number(row[8] || 0);
+      var rawText = String(row[12] || ''); // Raw/Notes column
+      
+      // Try to determine better category
+      var newCategory = null;
+      
+      // 1. First try pattern-based detection (fast, no API call)
+      newCategory = detectCategoryFromMerchantAudit_(merchant);
+      
+      // 2. If still no category and we have raw text, try AI
+      if (!newCategory && rawText && typeof classifyWithAI === 'function') {
+        try {
+          var aiResult = classifyWithAI(rawText);
+          if (aiResult && aiResult.category && aiResult.category !== 'أخرى') {
+            newCategory = aiResult.category;
+          }
+        } catch (aiErr) {
+          Logger.log('AI classification error for row ' + (i + 2) + ': ' + aiErr.message);
+        }
+      }
+      
+      // 3. If we have merchant but no raw, try AI with merchant
+      if (!newCategory && merchant && merchant !== 'غير محدد' && typeof classifyWithAI === 'function') {
+        try {
+          var aiResult2 = classifyWithAI('شراء من ' + merchant + ' بمبلغ ' + amount + ' ريال');
+          if (aiResult2 && aiResult2.category && aiResult2.category !== 'أخرى') {
+            newCategory = aiResult2.category;
+          }
+        } catch (aiErr2) {
+          Logger.log('AI classification error (merchant) for row ' + (i + 2) + ': ' + aiErr2.message);
+        }
+      }
+      
+      if (newCategory && newCategory !== category) {
+        // Validate the new category exists
+        if (typeof alignCategoryToKnown_ === 'function') {
+          newCategory = alignCategoryToKnown_(newCategory, '');
+        }
+        
+        if (newCategory !== 'أخرى') {
+          results.changes.push({
+            row: i + 2,
+            uuid: uuid,
+            merchant: merchant,
+            oldCategory: category,
+            newCategory: newCategory
+          });
+          
+          if (!dryRun) {
+            // Update the category in the sheet (column 11 = K = Category)
+            sheet.getRange(i + 2, 11).setValue(newCategory);
+            results.updated++;
+          }
+        } else {
+          results.skipped++;
+        }
+      } else {
+        results.skipped++;
+      }
+    }
+    
+    return {
+      success: true,
+      dryRun: dryRun,
+      processed: results.processed,
+      updated: dryRun ? 0 : results.updated,
+      wouldUpdate: dryRun ? results.changes.length : results.updated,
+      skipped: results.skipped,
+      changes: results.changes.slice(0, 30) // Return first 30 changes for review
+    };
+  } catch (e) {
+    Logger.log('Error in recategorizeOtherTransactions_: ' + e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Enhanced category detection from merchant name for audit purposes
+ */
+function detectCategoryFromMerchantAudit_(merchant) {
+  if (!merchant) return null;
+  var m = String(merchant).toLowerCase();
+  
+  // Food & Restaurants
+  if (/starbucks|coffee|قهوة|كافيه|cafe|مطعم|restaurant|برجر|burger|بيتزا|pizza|kfc|mcd|ماكدونالدز|هرفي|البيك|شاورما|فطور|غداء|عشاء|مخبز|bakery|حلويات|sweets|dunkin|krispy|baskin|تميس|فول|كنافة|شوكولاتة|آيس كريم|ice cream|صب واي|subway/.test(m)) {
+    return 'طعام';
+  }
+  
+  // Groceries
+  if (/بقالة|تموينات|سوبرماركت|supermarket|بندة|panda|carrefour|كارفور|danube|الدانوب|tamimi|التميمي|العثيم|othaim|farm|فارم|لولو|lulu/.test(m)) {
+    return 'طعام';
+  }
+  
+  // Fuel/Gas
+  if (/naft|نافت|بنزين|petrol|gas|fuel|محطة|station|وقود|aldrees|الدريس|ساسكو|sasco|petromin|بترومين/.test(m)) {
+    return 'وقود';
+  }
+  
+  // Transport
+  if (/uber|careem|كريم|jeeny|جيني|taxi|تاكسي|مواصلات|bolt|ترحال/.test(m)) {
+    return 'نقل';
+  }
+  
+  // Bills/Utilities
+  if (/electricity|كهرباء|water|مياه|stc|زين|zain|mobily|موبايلي|اتصالات|telecom|انترنت|internet|saudi electric|الكهرباء السعودية|المياه الوطنية/.test(m)) {
+    return 'فواتير';
+  }
+  
+  // Shopping
+  if (/amazon|امازون|noon|نون|jarir|جرير|extra|اكسترا|ikea|ايكيا|mall|مول|hypermarket|هايبر|zara|اتش اند ام|h&m|سنتربوينت|centrepoint|نمشي|namshi|شي ان|shein/.test(m)) {
+    return 'تسوق';
+  }
+  
+  // Entertainment
+  if (/netflix|نتفلكس|spotify|cinema|سينما|game|العاب|playstation|xbox|اشتراك|youtube|يوتيوب|apple|ابل|google play|متجر|vox|موفي/.test(m)) {
+    return 'ترفيه';
+  }
+  
+  // Health
+  if (/pharmacy|صيدلية|hospital|مستشفى|clinic|عيادة|doctor|دكتور|طبيب|nahdi|نهدي|dawa|دواء|medical|طبي|مختبر|lab/.test(m)) {
+    return 'صحة';
+  }
+  
+  // Education
+  if (/university|جامعة|school|مدرسة|institute|معهد|course|دورة|تعليم|education|udemy|coursera/.test(m)) {
+    return 'تعليم';
+  }
+  
+  // Housing
+  if (/rent|إيجار|ايجار|maintenance|صيانة|عقار|سكن|housing|real estate/.test(m)) {
+    return 'سكن';
+  }
+  
+  // ATM/Withdrawal
+  if (/atm|صراف|سحب|withdrawal|cash withdrawal|سحب نقدي/.test(m)) {
+    return 'سحب نقدي';
+  }
+  
+  // Salary/Income
+  if (/salary|راتب|payroll|مكافأة|bonus/.test(m)) {
+    return 'راتب';
+  }
+  
+  // Transfers
+  if (/transfer|تحويل|حوالة/.test(m)) {
+    return 'تحويل';
+  }
+  
+  return null;
 }

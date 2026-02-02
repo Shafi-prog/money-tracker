@@ -48,6 +48,18 @@ function parseSmsDate_(text) {
   if (m5) {
     return new Date(parseInt(m5[3]), parseInt(m5[2]) - 1, parseInt(m5[1]), now.getHours(), now.getMinutes());
   }
+
+  // Pattern 5.1: SAIB Short Date "ب09-13 05:41" (Assume Current Year/Next Year logic)
+  var m5b = text.match(/ب[ـ\s]*(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{2})/);
+  if (m5b) {
+      // Month-Day HH:MM
+      var month = parseInt(m5b[1]) - 1;
+      var day = parseInt(m5b[2]);
+      // If month is > current month + 2, assume it was last year? (Or bank always implies 'this year')
+      // Let's assume current year first
+      var y = now.getFullYear();
+      return new Date(y, month, day, parseInt(m5b[3]), parseInt(m5b[4]));
+  }
   
   // Pattern 6: Relative time "منذ 5 دقائق" or "قبل 2 ساعة"
   var m6 = text.match(/(?:منذ|قبل)\s+(\d+)\s+(ثانية|ثواني|دقيقة|دقائق|ساعة|ساعات|يوم|أيام)/i);

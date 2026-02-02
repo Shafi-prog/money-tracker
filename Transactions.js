@@ -107,6 +107,15 @@ function SOV1_UI_createTransaction_(data) {
       }
     }
     
+    // ✅ CLEAR MERCHANT MEMORY CACHE (so new transactions are included in learning)
+    if (typeof clearMerchantMemoryCache_ === 'function') {
+      try {
+        clearMerchantMemoryCache_();
+      } catch (eC) {
+        // Ignore cache clear errors
+      }
+    }
+    
     return { success: true, message: 'تم إضافة العملية بنجاح', uuid: uuid };
     
   } catch (e) {
@@ -358,4 +367,66 @@ function SOV1_CLEAN_TEST_TRANSACTIONS_BY_YEAR_(year) {
     Logger.log('Error cleaning test transactions: ' + e);
     return { success: false, error: e.message };
   }
+}
+
+/**
+ * Reprocess the last N transactions with updated classification logic
+ */
+function SOV1_REPROCESS_LAST_TRANSACTIONS(count) {
+  var ss = _ss();
+  var sheet = ss.getSheetByName('Sheet1');
+  if (!sheet || sheet.getLastRow() < 2) return { processed: 0, updated: 0 };
+  
+  var n = Number(count) || 20;
+  var lastRow = sheet.getLastRow();
+  var startRow = Math.max(2, lastRow - n + 1);
+  var numRows = lastRow - startRow + 1;
+  
+  var range = sheet.getRange(startRow, 1, numRows, 13);
+  var vals = range.getValues();
+  var updatedCount = 0;
+  
+  var sheetMap = ensureClassifierMapExists_();
+  var mapData = sheetMap ? sheetMap.getDataRange().getValues() : [];
+
+  for (var i = 0; i < vals.length; i++) {
+    var row = vals[i];
+    
+    // Column 9 (Index 9) is Merchant, Col 8 Amount, Col 12 Raw SMS, Col 10 Category
+    var currentCat = row[10];
+    var rawText = String(row[12] || '');
+    var merchant = String(row[9] || '');
+    var amount = Number(row[8] || 0);
+    
+    // Create a mock AI object
+    var ai = {
+      merchant: merchant,
+      amount: amount,
+      isIncoming: (String(row[11]) === 'income' || String(row[11]) === 'دخل'),
+      category: '',
+      type: ''
+    };
+    
+    // Try to find the REAL merchant in the raw text if the current merchant is generic 'mada' or 'Atheer'
+    if (/mada|atheer/i.test(merchant) && rawText.length > 5) {
+       // Only if we have raw text, we try to re-parse. 
+       // But simply passing (merchant + raw) to classifier works too.
+    }
+    
+    var textToClassify = merchant + " " + rawText;
+    
+    // Use Classifier.js function
+    var result = applyClassifierMap_(textToClassify, ai);
+    
+    if (result && result.category) {
+       var newCat = result.category;
+       if (newCat !== currentCat) {
+           // Update Category (Column 11)
+           sheet.getRange(startRow + i, 11).setValue(newCat);
+           updatedCount++;
+       }
+    }
+  }
+  
+  return { processed: numRows, updated: updatedCount };
 }

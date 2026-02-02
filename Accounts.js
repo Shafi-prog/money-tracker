@@ -15,11 +15,12 @@
 function ensureAccountsSheet_() {
   var sh = _sheet('Accounts');
   if (sh.getLastRow() === 0) {
-    sh.appendRow(['الاسم', 'النوع', 'الرقم', 'البنك', 'الرصيد', 'آخر_تحديث', 'حسابي', 'تحويل_داخلي', 'أسماء_بديلة', 'ملاحظات']);
+    sh.appendRow(['الاسم', 'النوع', 'الرقم', 'البنك', 'الرصيد', 'آخر_تحديث', 'حسابي', 'تحويل_داخلي', 'أسماء_بديلة', 'ملاحظات', 'الرصيد_الافتتاحي']);
     sh.setFrozenRows(1);
     sh.setRightToLeft(true);
-    // Format Balance
+    // Format Balance & Opening Balance
     sh.getRange('E:E').setNumberFormat('#,##0.00');
+    sh.getRange('K:K').setNumberFormat('#,##0.00');
     // Format Date
     sh.getRange('F:F').setNumberFormat('yyyy-MM-dd HH:mm');
     // Set widths
@@ -581,4 +582,32 @@ function isInternalTransfer_(fromAccount, toAccount) {
   if (!fromInfo || !toInfo) return false;
   
   return fromInfo.isMine && toInfo.isMine;
+}
+
+/**
+ * Update aliases for an account by account number
+ * @param {string} accountNum - The account number to update
+ * @param {string} newAliases - Comma-separated list of aliases
+ */
+function UPDATE_ACCOUNT_ALIASES(accountNum, newAliases) {
+  var sh = ensureAccountsSheet_();
+  var last = sh.getLastRow();
+  
+  if (last < 2) return { success: false, error: 'No accounts found' };
+  
+  var data = sh.getRange(2, 1, last - 1, 11).getValues();
+  var found = false;
+  
+  for (var i = 0; i < data.length; i++) {
+    var num = String(data[i][2] || '').trim();
+    if (num === String(accountNum).trim()) {
+      sh.getRange(i + 2, 9).setValue(newAliases);
+      found = true;
+      // Clear cache
+      CacheService.getScriptCache().remove('ACCOUNTS_INDEX_V2');
+      return { success: true, account: num, newAliases: newAliases };
+    }
+  }
+  
+  return { success: false, error: 'Account ' + accountNum + ' not found' };
 }

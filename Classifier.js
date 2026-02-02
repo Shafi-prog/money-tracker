@@ -217,12 +217,57 @@ function applySmartRules_(rawText, ai) {
       ai.isInternal = true;
       return ai;
     }
+
+    // Fuel & Gas Stations / وقود ومحطات
+    if (/station|petrol|fuel|gas|oil|محطة|وقود/i.test(text) && !/police/i.test(text)) {
+      ai.category = 'وقود'; // Fuel
+      return ai;
+    }
+
+    // Restaurants & Cafes / مطاعم ومقاهي
+    if (/restaurant|cafe|coffee|burger|pizza|shawarma|مطعم|كافيه|قهوة|برجر|شاورما|بيتزا/i.test(text)) {
+      ai.category = 'طعام'; // Food
+      return ai;
+    }
+
+    // Supermarkets / تموينات
+    if (/market|grocery|panda|othaim|danube|tamimi|lulu|bakery|super|تموينات|سوبر|بنده|العثيم|الدانوب|التميمي|مخبز/i.test(text)) {
+      ai.category = 'تسوق'; // Shopping/Groceries
+      return ai;
+    }
     
     // Internal Transfer / حوالة داخلية صادرة/واردة
-    if (/حوالة داخلية صادرة|حوالة داخلية واردة/i.test(text)) {
-      ai.category = 'تحويل داخلي';
+    // FIX: "حوالة داخلية صادرة" usually means "Same Bank Transfer" (e.g. Rajhi to Rajhi)
+    // It should be 'Outgoing Transfer' (Expense) unless we confirm the destination is ours.
+    if (/حوالة داخلية صادرة/i.test(text)) {
+       // Check if destination matches any of our known own accounts
+       var isToMe = false;
+       var ownAccountsStr = PropertiesService.getScriptProperties().getProperty('OWN_ACCOUNTS') || '';
+       var ownAccounts = ownAccountsStr.split(',');
+       for (var k=0; k<ownAccounts.length; k++) {
+           var acc = String(ownAccounts[k]).trim();
+           if (acc.length > 3 && text.indexOf(acc) !== -1) {
+               isToMe = true;
+               break;
+           }
+       }
+       
+       if (isToMe) {
+           ai.category = 'تحويل داخلي';
+           ai.type = 'حوالة داخية';
+           ai.isInternal = true;
+       } else {
+           ai.category = 'حوالات صادرة'; // Treat as Expense to others
+           ai.type = 'حوالة';
+           ai.isIncoming = false;
+       }
+       return ai;
+    }
+
+    if (/حوالة داخلية واردة/i.test(text)) {
+      ai.category = 'حوالات واردة'; // Assume income unless from self
       ai.type = 'حوالة';
-      ai.isIncoming = /واردة/i.test(text);
+      ai.isIncoming = true;
       return ai;
     }
     

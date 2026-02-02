@@ -51,8 +51,10 @@ function SOV1_enqueue_(source, text, meta, fingerprint) {
  * - يستخدم LockService لمنع تشغيل متزامن
  */
 function SOV1_processQueueBatch_() {
-  var lock = LockService.getScriptLock();
-  if (!lock.tryLock(20000)) return;
+  // var lock = LockService.getScriptLock();
+  // if (!lock.tryLock(20000)) return;
+
+  logIngressEvent_('INFO', 'SOV1_processQueueBatch_', {}, 'start');
 
   try {
     var sh = SOV1_ensureQueueSheet_();
@@ -112,7 +114,6 @@ function SOV1_processQueueBatch_() {
       handled++;
     }
   } finally {
-    try { lock.releaseLock(); } catch (e2) {}
   }
 }
 

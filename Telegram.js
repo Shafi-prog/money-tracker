@@ -33,6 +33,7 @@ function sendTelegramLogged_(chatId, text, extra) {
   var payload = Object.assign({
     chat_id: String(chatId),
     text: String(text || ''),
+    parse_mode: 'HTML',
     disable_web_page_preview: true
   }, extra || {});
 
@@ -63,7 +64,7 @@ function sendTelegram_(chatId, text) {
 /** ===== لوحة التحكم (Reply Keyboard) ===== */
 function sendMenuPanel_(chatId) {
   var hub = String(chatId || getHubChatId_());
-  if (!hub) return;
+  if (!hub) return { ok: false, error: "No Hub ID" };
 
   var keyboard = {
     keyboard: [
@@ -80,7 +81,7 @@ function sendMenuPanel_(chatId) {
     '• إدخال يدوي: <code>أضف: 45.75\nجهة\nتصنيف</code>\n' +
     '• إخفاء اللوحة: <code>/menu_off</code>';
 
-  sendTelegramLogged_(hub, msg, { parse_mode: 'HTML', reply_markup: JSON.stringify(keyboard) });
+  return sendTelegramLogged_(hub, msg, { parse_mode: 'HTML', reply_markup: JSON.stringify(keyboard) });
 }
 
 function removeMenuPanel_(chatId) {
@@ -98,11 +99,8 @@ function sendBudgetsSnapshotToTelegram_(chatId) {
   var hub = String(chatId || getHubChatId_());
   if (!hub) return;
   
-  // Check if budget alerts are enabled
-  if (typeof areBudgetAlertsEnabled === 'function' && !areBudgetAlertsEnabled()) {
-    Logger.log('Budget snapshot skipped - alerts disabled');
-    return;
-  }
+  // NOTE: We do not check areBudgetAlertsEnabled() here because this function
+  // is called by explicit user command (/budgets). The user expects a response anywhere.
 
   var cache = CacheService.getScriptCache();
   var cached = cache.get('BUDGET_SNAP');
@@ -344,7 +342,7 @@ function sendTransactionReport(ai, sync, src, raw, destChatId) {
     category = _normalizeCategoryNameArabic_(category) || category;
   }
   if (/^pos$/i.test(category) || /^unknown$/i.test(category)) category = 'أخرى';
-  if (isTransfer) category = 'تحويل';
+  // Removed override: if (isTransfer) category = 'تحويل';
 
   // الرمز حسب الاتجاه
   var directionEmoji = isIncoming ? '⬇️' : '⬆️';
@@ -387,44 +385,56 @@ function sendTransactionReport(ai, sync, src, raw, destChatId) {
     }
   } catch (eAcc) {}
   
-  // ===== التنسيق المطلوب =====
-  var html = '✅ <b>رصـد مـالـي • ' + escHtml_(operationType) + '</b>\n';
-  html += '━━━━━━━━━━━━━━\n';
-
-  var accLabel = accountDisplay ? (accountName ? (accountName + ' • ' + accountDisplay) : accountDisplay) : '';
-  var partyLabel = isTransfer ? (isIncoming ? 'من' : 'إلى') : 'المتجر';
-  var partyValue = isTransfer ? merchant : merchant;
-
-  var table = [];
-  table.push('التاريخ    | ' + dateStr);
-  table.push('المبلغ     | ' + amount.toFixed(2) + ' SAR ' + directionEmoji);
-  if (accLabel) table.push('الحساب    | ' + accLabel);
-  if (bankName) table.push('البنك     | ' + bankName);
-  table.push(partyLabel + padLabel_(partyLabel) + ' | ' + partyValue);
-  table.push('التصنيف    | ' + category);
-
-  html += '<pre>' + escHtml_(table.join('\n')) + '</pre>';
+  // ===== التنسيق الجديد (Sleek SMS Style) =====
+  var opEmoji = isIncoming ? '💰' : (isTransfer ? '🔄' : '💸');
+  var header = opEmoji + ' <b>' + escHtml_(operationType) + '</b>';
   
-  // عرض جميع الأرصدة الحالية
+  var html = header + '\n';
+  html += 'بـ <b>' + amount.toFixed(2) + ' SAR</b> ';
+  
+  if (isTransfer) {
+      // Transfer logic
+      html += (isIncoming ? 'من ' : 'إلى ') + '<b>' + escHtml_(partyValue) + '</b>';
+  } else {
+      // Purchase logic
+      html += 'لدى <b>' + escHtml_(partyValue) + '</b>';
+  }
+  html += '\n\n';
+  
+  // Account Info Line
+  if (accLabel || bankName) {
+     var accInfoPart = bankName ? (bankName + (cardNum ? ' (' + cardNum + ')' : '')) : accLabel;
+     html += '💳 ' + escHtml_(accInfoPart) + '\n';
+  }
+  
+  // Time & Category
+  html += '📅 ' + dateStr + '\n';
+  html += '🏷️ ' + escHtml_(category) + '\n';
+  
+  // Show Current Balance of THIS account (if available from sync)
+  if (sync && (sync.accountBalance !== undefined && sync.accountBalance !== null) && (sync.accountBalance !== 0 || isIncoming)) {
+     html += '💰 <b>رصيد الحساب: ' + Number(sync.accountBalance).toFixed(2) + ' SAR</b>\n';
+  }
+
+  // عرض جميع الأرصدة الحالية (Collapsible-like separator)
   if (typeof getAllBalancesHTML_ === 'function') {
     var balancesHTML = getAllBalancesHTML_();
     if (balancesHTML) {
-      html += balancesHTML;
+      html += balancesHTML; // This usually starts with a separator
     }
   }
   
   // إجمالي المصروف/الإدانة
   if (aggregationText) {
-    html += '━━━━━━━━━━━━━━\n';
+    html += '\n━━━━━━━━━━━━━━\n';
     html += aggregationText + '\n';
   }
   
-  // النص الأصلي مختصر
-  var rawPreview = String(raw || '').slice(0, 100);
-  if (rawPreview) {
-    html += '━━━━━━━━━━━━━━\n';
-    html += '📝 النص الأصلي:\n';
-    html += '<code>' + escHtml_(rawPreview) + '</code>';
+  // النص الأصلي (Restore exact SMS)
+  if (raw && raw.length > 1) {
+    html += '\n━━━━━━━━━━━━━━\n';
+    html += '📝 <b>النص الأصلي:</b>\n';
+    html += '<code>' + escHtml_(raw) + '</code>';
   }
 
   // ✅ إرسال بدون أزرار - استخدم /commands فقط

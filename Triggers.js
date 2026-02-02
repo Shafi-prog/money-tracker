@@ -15,7 +15,7 @@ function deleteTriggers_(names) {
 }
 
 function setupTimeTriggers() {
-  deleteTriggers_(['weeklyReport', 'monthlyReport', 'insertMonthlySalary']);
+  deleteTriggers_(['weeklyReport', 'monthlyReport', 'insertMonthlySalary', 'SOV1_processQueueBatch_']);
 
   ScriptApp.newTrigger('weeklyReport')
     .timeBased()
@@ -35,7 +35,13 @@ function setupTimeTriggers() {
     .atHour(9)
     .create();
 
-  safeNotify('⏰ تم إعداد المشغلات: أسبوعي (السبت)، شهري تقرير (26)، راتب (27).');
+  // Queue Processing (Every 1 Minute)
+  ScriptApp.newTrigger('SOV1_processQueueBatch_')
+    .timeBased()
+    .everyMinutes(1)
+    .create();
+
+  safeNotify('⏰ تم إعداد المشغلات: معالج الطابور (كل دقيقة)، أسبوعي (السبت)، شهري تقرير (26)، راتب (27).');
 }
 
 function insertMonthlySalary() {

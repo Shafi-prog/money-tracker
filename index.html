@@ -1749,14 +1749,14 @@
       </div>
 
       <!-- Accounts Summary Section -->
-      <!-- MOVED TO ACCOUNTS PAGE as requested -->
-      <div class="mt-8" x-show="accounts.length > 0 && false"> <!-- Hidden -->
+      
+      <div class="mt-8" x-show="accounts.length > 0"> 
         <div class="flex items-center justify-between mb-4">
           <h3 class="text-lg font-bold text-gray-800">💳 حساباتي</h3>
           <a href="#" @click.prevent="page = 'accounts'" class="text-sm text-green-600 hover:underline font-medium">إدارة الحسابات</a>
         </div>
         <div class="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          <template x-for="account in accounts.slice(0, 4)" :key="account.name">
+          <template x-for="account in accounts.slice(0, 8)" :key="account.name">
             <div class="bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl p-4 text-white shadow-lg hover:shadow-xl transition-shadow">
               <div class="flex items-center justify-between mb-3">
                 <span class="text-xl">

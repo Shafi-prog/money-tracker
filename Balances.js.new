@@ -13,21 +13,16 @@
 function ensureBalancesSheet_() {
   var sh = _sheet('Accounts');
   if (sh.getLastRow() === 0) {
-    sh.appendRow(['الاسم', 'النوع', 'الرقم', 'البنك', 'الرصيد', 'آخر_تحديث', 'حسابي', 'تحويل_داخلي', 'أسماء_بديلة', 'ملاحظات', 'الرصيد_الافتتاحي']);
+    sh.appendRow(['الاسم', 'النوع', 'الرقم', 'البنك', 'الرصيد', 'آخر_تحديث', 'حسابي', 'تحويل_داخلي', 'أسماء_بديلة', 'ملاحظات']);
     sh.setFrozenRows(1);
     sh.setRightToLeft(true);
     sh.getRange('E:E').setNumberFormat('#,##0.00');  // الرصيد
-    sh.getRange('K:K').setNumberFormat('#,##0.00');  // الرصيد_الافتتاحي
     sh.getRange('F:F').setNumberFormat('yyyy-MM-dd HH:mm:ss');  // آخر_تحديث
   } else {
     // Fix legacy header if it exists
-    var header = sh.getRange(1, 1, 1, 11).getValues()[0];
+    var header = sh.getRange(1, 1, 1, 10).getValues()[0];
     if (String(header[7] || '') === 'SMS_Pattern') {
       sh.getRange(1, 8).setValue('تحويل_داخلي');
-    }
-    // Ensure Opening Balance Header
-    if (header.length < 11 || String(header[10] || '') === '') {
-       sh.getRange(1, 11).setValue('الرصيد_الافتتاحي');
     }
   }
   return sh;
@@ -43,46 +38,29 @@ function getAccountInfo_(accountKey) {
   
   // Columns: Name(0), Type(1), Number(2), Bank(3), Balance(4), LastUpdate(5), IsMine(6), IsInternal(7), Aliases(8)
   var data = sh.getRange(2, 1, lastRow - 1, 9).getValues();
-  var rawKey = String(accountKey || '').trim().toLowerCase();
-  
-  // Clean key: remove asterisks and leading zeros
-  var cleanKey = rawKey.replace(/^\*+/, '').replace(/^0+/, '');
+  var cleanKey = String(accountKey || '').trim().toLowerCase().replace(/^\*/, '');
   
   for (var i = 0; i < data.length; i++) {
     var rowName = String(data[i][0] || '').trim().toLowerCase();  // Account Name
     var rowNum = String(data[i][2] || '').trim().toLowerCase();   // Account Number
-    var aliasesStr = String(data[i][8] || '').toLowerCase();      // Aliases
-    var aliases = aliasesStr.split(',').map(function(s) { return s.trim(); });
+    var aliases = String(data[i][8] || '').toLowerCase();         // Aliases
     
-    // Check name or number (exact match)
-    if (rowName === rawKey || rowNum === rawKey || rowName === cleanKey || rowNum === cleanKey) {
-       return buildInfo_(data[i], i + 2);
-    }
-    
-    // Check aliases (exact match against cleaned or raw)
-    for (var j = 0; j < aliases.length; j++) {
-      var alias = aliases[j];
-      var aliasClean = alias.replace(/^\*+/, '').replace(/^0+/, '');
-      
-      if (alias === rawKey || alias === cleanKey || aliasClean === cleanKey) {
-        return buildInfo_(data[i], i + 2);
-      }
+    // Check name, number, or aliases
+    if (rowName === cleanKey || rowNum === cleanKey || 
+        aliases.indexOf(cleanKey) >= 0 || aliases.indexOf('*' + cleanKey) >= 0) {
+      return {
+        row: i + 2,
+        name: String(data[i][0]),
+        type: String(data[i][1]),
+        number: String(data[i][2]),
+        bank: String(data[i][3]),
+        balance: Number(data[i][4] || 0),
+        isMine: String(data[i][6] || '').toUpperCase() === 'TRUE'
+      };
     }
   }
   
   return null;
-}
-
-function buildInfo_(row, rowIndex) {
-  return {
-    row: rowIndex,
-    name: String(row[0]),
-    type: String(row[1]),
-    number: String(row[2]),
-    bank: String(row[3]),
-    balance: Number(row[4] || 0),
-    isMine: String(row[6] || '').toUpperCase() === 'TRUE'
-  };
 }
 
 /**
@@ -144,8 +122,8 @@ function rebuildBalancesFromHistory() {
     if (accLast < 2) return 'No accounts found';
     
     // Load accounts into memory
-    // Name(0), Type(1), Number(2), Bank(3), Balance(4), LastUpdate(5), IsMine(6), Int(7), Alias(8), Notes(9), Opening(10)
-    var accData = accSheet.getRange(2, 1, accLast - 1, 11).getValues();
+    // Name(0), Type(1), Number(2), Bank(3), Balance(4), LastUpdate(5), IsMine(6), Int(7), Alias(8)
+    var accData = accSheet.getRange(2, 1, accLast - 1, 9).getValues();
     var balancesByIndex = new Array(accData.length).fill(0.0);
     var indexMap = {};
     
@@ -158,21 +136,10 @@ function rebuildBalancesFromHistory() {
         
         if (kNum) indexMap[kNum] = i;
         if (kName) indexMap[kName] = i;
-        aliases.forEach(function(a){ 
-          var clean = a.trim().replace(/^\*+/, ''); // Remove leading asterisks
-          if(clean) {
-            indexMap[clean] = i;
-            indexMap['*' + clean] = i; // Also map with asterisk
-            // Also map with/without leading zeros for card numbers
-            if (/^\d+$/.test(clean)) {
-              indexMap[clean.replace(/^0+/, '')] = i; // Without leading zeros
-              indexMap[clean.padStart(4, '0')] = i;   // With leading zeros
-            }
-          }
-        });
+        aliases.forEach(function(a){ if(a.trim()) indexMap[a.trim()] = i; });
         
-        // Initialize with Opening Balance
-        balancesByIndex[i] = Number(row[10] || 0.0);
+        // Reset starting balance effectively to 0 for rebuild
+        balancesByIndex[i] = 0.0;
     }
     
     // 2. Read All Transactions
@@ -186,7 +153,6 @@ function rebuildBalancesFromHistory() {
     });
     
     // 3. Replay Transactions
-    var debugTxLog = [];
     for (var k = 0; k < txData.length; k++) {
       var tx = txData[k];
       var accNum = String(tx[6] || '').trim().toLowerCase();
@@ -194,30 +160,16 @@ function rebuildBalancesFromHistory() {
       var amount = Number(tx[8] || 0);
       var type = String(tx[11] || '').toLowerCase();
       var notes = String(tx[12] || '');
-      var merchant = String(tx[9] || '');
       
       var isIncoming = (type === 'income' || type === 'دخل' || type === 'إيداع' || type === 'راتب' || notes.indexOf('وارد') !== -1);
       
       var idx = -1;
-      // Normalize account numbers - handle leading zeros and asterisks
-      var accNumClean = accNum.replace(/^0+/, '').replace(/^\*+/, '');
-      var cardNumClean = cardNum.replace(/^0+/, '').replace(/^\*+/, '');
-      
       if (accNum && indexMap.hasOwnProperty(accNum)) idx = indexMap[accNum];
-      else if (accNumClean && indexMap.hasOwnProperty(accNumClean)) idx = indexMap[accNumClean];
       else if (cardNum && indexMap.hasOwnProperty(cardNum)) idx = indexMap[cardNum];
-      else if (cardNumClean && indexMap.hasOwnProperty(cardNumClean)) idx = indexMap[cardNumClean];
       
       if (idx !== -1) {
-          if (isIncoming) {
-            balancesByIndex[idx] += amount;
-            debugTxLog.push('INC: ' + accNum + ' +' + amount + ' (' + merchant + ')');
-          } else {
-            balancesByIndex[idx] -= amount;
-            debugTxLog.push('EXP: ' + accNum + ' -' + amount + ' (' + merchant + ')');
-          }
-      } else {
-          debugTxLog.push('SKIP: ' + accNum + '/' + cardNum + ' amt=' + amount + ' (' + merchant + ')');
+          if (isIncoming) balancesByIndex[idx] += amount;
+          else balancesByIndex[idx] -= amount;
       }
     }
     
@@ -238,15 +190,7 @@ function rebuildBalancesFromHistory() {
     }
     
     Logger.log('✅ Balance Rebuild Complete (Optimized).');
-    Logger.log('TX Log: ' + debugTxLog.join(' | '));
-    
-    // Return debug info
-    return JSON.stringify({ 
-      status: 'Rebuild Complete', 
-      accounts: accData.length,
-      transactions: txData.length,
-      txLog: debugTxLog.slice(0, 20) // First 20 for debugging
-    });
+    return 'Rebuild Successful (Optimized)';
     
   } catch (e) {
     Logger.log('Error rebuilding balances: ' + e);

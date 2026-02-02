@@ -113,6 +113,17 @@ function RUN_MASTER_TESTS() {
   // إرسال تقرير للتليجرام
   sendTestReportToTelegram_(results, totalPassed, totalFailed, totalSkipped, duration);
   
+  // ✅ AUTO-CLEANUP: Ensure no test data persists
+  Logger.log('\n🧹 Performing Auto-Cleanup of Test Data...');
+  try {
+    CLEANUP_TEST_DATA();
+    if (typeof SOV1_CLEAN_TEST_TRANSACTIONS_BY_YEAR_ === 'function') {
+        SOV1_CLEAN_TEST_TRANSACTIONS_BY_YEAR_(new Date().getFullYear());
+    }
+  } catch (e) {
+    Logger.log('⚠️ Auto-Cleanup Error: ' + e.message);
+  }
+
   return {
     suites: results,
     summary: {

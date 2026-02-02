@@ -163,6 +163,8 @@ function processTransaction(smsText, source, destChatId) {
     smsText = String(smsText || '');
     source = String(source || 'غير معروف');
 
+    logIngressEvent_('INFO', 'processTransaction', { smsText: smsText.slice(0,100), source: source }, 'start');
+
     // 1) Templates (إن وجدت)
     var ai = null;
     try {

@@ -591,11 +591,11 @@ function handleTelegramCommand_(chatId, text, msg) {
   switch (cmd) {
     case '/menu':
     case '/start':
-      if (typeof sendMenuPanel_ === "function") sendMenuPanel_(chatId);
+      if (typeof sendMenuPanel_ === "function") return sendMenuPanel_(chatId);
       break;
       
     case '/menu_off':
-      if (typeof removeMenuPanel_ === "function") removeMenuPanel_(chatId);
+      if (typeof removeMenuPanel_ === "function") return removeMenuPanel_(chatId);
       break;
       
     case '/today':
