@@ -331,7 +331,12 @@ function getKnownCategories_() {
     // Preferred: UI categories list (handles Arabic/English schema)
     if (typeof SOV1_UI_getCategories_ === 'function') {
       var list = SOV1_UI_getCategories_('OPEN');
-      if (list && list.length) return list;
+      if (list && list.length) {
+        // Extract .name from objects if needed
+        return list.map(function(c) {
+          return (typeof c === 'object' && c !== null && c.name) ? c.name : String(c || '');
+        }).filter(Boolean);
+      }
     }
 
     // Fallback: CategoryManager schema

@@ -29,7 +29,7 @@ function ensureBalancesSheet_() {
 }
 
 /**
- * Get full account info by number/key
+ * Get full account info by number/key/name
  */
 function getAccountInfo_(accountKey) {
   var sh = ensureBalancesSheet_();
@@ -41,16 +41,18 @@ function getAccountInfo_(accountKey) {
   var cleanKey = String(accountKey || '').trim().toLowerCase().replace(/^\*/, '');
   
   for (var i = 0; i < data.length; i++) {
-    var rowNum = String(data[i][2] || '').trim().toLowerCase();
-    var aliases = String(data[i][8] || '').toLowerCase(); // Aliases
+    var rowName = String(data[i][0] || '').trim().toLowerCase();  // Account Name
+    var rowNum = String(data[i][2] || '').trim().toLowerCase();   // Account Number
+    var aliases = String(data[i][8] || '').toLowerCase();         // Aliases
     
-    // Check main number or aliases
-    if (rowNum === cleanKey || aliases.indexOf(cleanKey) >= 0 || aliases.indexOf('*' + cleanKey) >= 0) {
+    // Check name, number, or aliases
+    if (rowName === cleanKey || rowNum === cleanKey || 
+        aliases.indexOf(cleanKey) >= 0 || aliases.indexOf('*' + cleanKey) >= 0) {
       return {
         row: i + 2,
         name: String(data[i][0]),
         type: String(data[i][1]),
-        number: String(data[i][2]), // Return the canonical number (data[i][2])
+        number: String(data[i][2]),
         bank: String(data[i][3]),
         balance: Number(data[i][4] || 0),
         isMine: String(data[i][6] || '').toUpperCase() === 'TRUE'

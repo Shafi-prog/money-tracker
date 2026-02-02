@@ -53,8 +53,15 @@ function SOV1_UI_createTransaction_(data) {
     var amount = Math.abs(Number(data.amount));
     var type = data.type || 'expense';
     var merchant = data.merchant || 'غير محدد';
-    var categoryRaw = data.category || 'أخرى';
-    var category = normalizeCategoryForBudget_(categoryRaw);
+    var categoryRaw = data.category || '';
+    
+    // Only auto-detect category if truly empty/undefined (not if user selected "أخرى")
+    var category = categoryRaw;
+    if (!category || category.trim() === '') {
+      category = detectCategoryFromMerchant_(merchant) || 'أخرى';
+    }
+    category = normalizeCategoryForBudget_(category);
+    
     var notes = data.notes || '';
     var account = data.account || 'نقدي';
     
@@ -83,12 +90,89 @@ function SOV1_UI_createTransaction_(data) {
       applyBudgetAmount_(category, isIncoming ? -amount : amount);
     }
     
-    return { success: true, message: 'تم إضافة العملية بنجاح' };
+    // ✅ UPDATE ACCOUNT BALANCE
+    if (typeof updateBalancesAfterTransaction_ === 'function') {
+      try {
+        updateBalancesAfterTransaction_({
+          accNum: account,
+          cardNum: '',
+          merchant: merchant,
+          amount: amount,
+          isIncoming: isIncoming,
+          category: category,
+          type: type
+        });
+      } catch (eB) {
+        Logger.log('Balance update error: ' + eB.message);
+      }
+    }
+    
+    return { success: true, message: 'تم إضافة العملية بنجاح', uuid: uuid };
     
   } catch (e) {
     Logger.log('Error creating transaction: ' + e);
     return { success: false, error: e.message };
   }
+}
+
+/**
+ * Detect category from merchant name using pattern matching
+ */
+function detectCategoryFromMerchant_(merchant) {
+  if (!merchant) return null;
+  var m = String(merchant).toLowerCase();
+  
+  // Food & Restaurants
+  if (/starbucks|coffee|قهوة|كافيه|cafe|مطعم|restaurant|برجر|burger|بيتزا|pizza|kfc|mcd|ماكدونالدز|هرفي|البيك|شاورما|فطور|غداء|عشاء|مخبز|bakery|حلويات|sweets/.test(m)) {
+    return 'طعام';
+  }
+  
+  // Fuel/Gas
+  if (/naft|نافت|بنزين|petrol|gas|fuel|محطة|station|وقود/.test(m)) {
+    return 'وقود';
+  }
+  
+  // Transport
+  if (/uber|careem|كريم|jeeny|جيني|taxi|تاكسي|مواصلات/.test(m)) {
+    return 'نقل';
+  }
+  
+  // Bills/Utilities
+  if (/electricity|كهرباء|water|مياه|stc|زين|zain|mobily|موبايلي|اتصالات|telecom|انترنت|internet/.test(m)) {
+    return 'فواتير';
+  }
+  
+  // Shopping
+  if (/amazon|امازون|noon|نون|jarir|جرير|extra|اكسترا|ikea|ايكيا|mall|مول|hypermarket|هايبر|carrefour|كارفور|panda|بنده|danube|الدانوب|tamimi|التميمي/.test(m)) {
+    return 'تسوق';
+  }
+  
+  // Entertainment
+  if (/netflix|نتفلكس|spotify|cinema|سينما|game|العاب|playstation|xbox|اشتراك/.test(m)) {
+    return 'ترفيه';
+  }
+  
+  // Health
+  if (/pharmacy|صيدلية|hospital|مستشفى|clinic|عيادة|doctor|دكتور|طبيب|nahdi|نهدي|dawa|دواء/.test(m)) {
+    return 'صحة';
+  }
+  
+  // Education
+  if (/university|جامعة|school|مدرسة|institute|معهد|course|دورة|تعليم|education/.test(m)) {
+    return 'تعليم';
+  }
+  
+  // Housing
+  if (/rent|إيجار|ايجار|maintenance|صيانة|عقار/.test(m)) {
+    return 'سكن';
+  }
+  
+  // ATM/Withdrawal
+  if (/atm|صراف|سحب|withdrawal/.test(m)) {
+    return 'سحب نقدي';
+  }
+  
+  return null;
 }
 
 /**
