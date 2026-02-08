@@ -67,6 +67,10 @@
         // Test panel states
         testingStates: { sms: false, ai: false, telegram: false, fullFlow: false },
         testResults: { sms: '', ai: '', telegram: '', fullFlow: '' },
+        // Debts state
+        debts: [],
+        showDebtModal: false,
+        newDebt: { party: '', amount: 0, type: 'owed_to_me', description: '' },
         
         navigateToPage(pageName) {
           this.page = pageName;
@@ -714,6 +718,38 @@
               this.accounts = [];
             })
             .SOV1_UI_getAccounts();
+        },
+        
+        loadDebts() {
+          google.script.run
+            .withSuccessHandler(data => {
+              this.debts = data || [];
+              console.log('Debts loaded:', data);
+            })
+            .withFailureHandler(err => {
+              console.error('Error loading debts:', err);
+              this.debts = [];
+            })
+            .SOV1_UI_getDebts();
+        },
+        
+        addDebt() {
+          if (!this.newDebt.party || !this.newDebt.amount) {
+            this.showToast('يرجى إدخال اسم الشخص والمبلغ', 'error');
+            return;
+          }
+          
+          google.script.run
+            .withSuccessHandler(result => {
+              this.showDebtModal = false;
+              this.showToast('تم إضافة الدين بنجاح');
+              this.newDebt = { party: '', amount: 0, type: 'owed_to_me', description: '' };
+              this.loadDebts();
+            })
+            .withFailureHandler(err => {
+              this.showToast('فشل إضافة الدين: ' + err, 'error');
+            })
+            .SOV1_UI_addDebt(this.newDebt);
         },
         
         addOrEditBudget() {
@@ -1609,6 +1645,9 @@
       <a href="#" @click.prevent="page='accounts'" :class="{'bg-green-50 text-green-700': page==='accounts', 'text-gray-600 hover:bg-gray-50': page!=='accounts'}" class="flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors">
         <span>🏦</span> الحسابات
       </a>
+      <a href="#" @click.prevent="page='debts'; loadDebts()" :class="{'bg-green-50 text-green-700': page==='debts', 'text-gray-600 hover:bg-gray-50': page!=='debts'}" class="flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors">
+        <span>🤝</span> الديون
+      </a>
       <a href="#" @click.prevent="page='settings'" :class="{'bg-green-50 text-green-700': page==='settings', 'text-gray-600 hover:bg-gray-50': page!=='settings'}" class="flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors">
         <span>⚙️</span> الإعدادات
       </a>
@@ -1657,6 +1696,9 @@
          </a>
          <a href="#" @click="page='accounts'; mobileMenu=false" :class="{'bg-green-50 text-green-700': page==='accounts'}" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 font-medium">
            <span>🏦</span> الحسابات
+         </a>
+         <a href="#" @click="page='debts'; loadDebts(); mobileMenu=false" :class="{'bg-green-50 text-green-700': page==='debts'}" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 font-medium">
+           <span>🤝</span> الديون
          </a>
          <a href="#" @click="page='settings'; mobileMenu=false" :class="{'bg-green-50 text-green-700': page==='settings'}" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 font-medium">
            <span>⚙️</span> الإعدادات
@@ -2378,6 +2420,68 @@
       </div>
     </div>
 
+    <!-- PAGE: DEBTS -->
+    <div x-show="page === 'debts'" x-transition.opacity>
+      <header class="mb-8 flex justify-between items-center">
+        <div>
+          <h1 class="text-2xl font-bold text-gray-900">🤝 سجل الديون</h1>
+          <p class="text-gray-500 text-sm mt-1">تتبع ما لك وما عليك من أموال</p>
+        </div>
+        <button @click="showDebtModal = true" class="px-6 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 transition flex items-center gap-2">
+          <span>➕</span> إضافة دين
+        </button>
+      </header>
+      
+      <!-- Summary Cards -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        <div class="bg-gradient-to-br from-green-500 to-green-600 text-white p-6 rounded-2xl shadow-lg">
+          <div class="text-sm opacity-80 mb-1">لك (مستحقات)</div>
+          <div class="text-3xl font-bold" x-text="formatMoney(debts.filter(d => d.balance > 0).reduce((s,d) => s + d.balance, 0))">0 SAR</div>
+        </div>
+        <div class="bg-gradient-to-br from-red-500 to-red-600 text-white p-6 rounded-2xl shadow-lg">
+          <div class="text-sm opacity-80 mb-1">عليك (ديون)</div>
+          <div class="text-3xl font-bold" x-text="formatMoney(Math.abs(debts.filter(d => d.balance < 0).reduce((s,d) => s + d.balance, 0)))">0 SAR</div>
+        </div>
+        <div class="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-6 rounded-2xl shadow-lg">
+          <div class="text-sm opacity-80 mb-1">الصافي</div>
+          <div class="text-3xl font-bold" x-text="formatMoney(debts.reduce((s,d) => s + d.balance, 0))">0 SAR</div>
+        </div>
+      </div>
+      
+      <!-- Debts List -->
+      <div x-show="debts.length === 0" class="bg-white rounded-2xl shadow-sm border border-gray-100 p-12 text-center">
+        <div class="text-6xl mb-4">🤝</div>
+        <h3 class="text-xl font-bold text-gray-900 mb-2">لا توجد ديون مسجلة</h3>
+        <p class="text-gray-500 mb-6">ابدأ بتسجيل الديون لتتبع ما لك وما عليك</p>
+        <button @click="showDebtModal = true" class="px-6 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 transition">
+          ➕ إضافة دين جديد
+        </button>
+      </div>
+      
+      <div x-show="debts.length > 0" class="space-y-4">
+        <template x-for="debt in debts" :key="debt.party">
+          <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 hover:shadow-md transition">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-4">
+                <div class="w-12 h-12 rounded-full flex items-center justify-center text-2xl"
+                     :class="debt.balance > 0 ? 'bg-green-100' : 'bg-red-100'">
+                  <span x-text="debt.balance > 0 ? '🟢' : '🔴'"></span>
+                </div>
+                <div>
+                  <div class="font-bold text-gray-900" x-text="debt.party">الشخص</div>
+                  <div class="text-sm text-gray-500" x-text="debt.balance > 0 ? 'لك عنده' : 'عليك له'"></div>
+                </div>
+              </div>
+              <div class="text-left">
+                <div class="text-2xl font-bold" :class="debt.balance > 0 ? 'text-green-600' : 'text-red-600'" 
+                     x-text="formatMoney(Math.abs(debt.balance))">0 SAR</div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
     <!-- PAGE: ACCOUNTS -->
     <div x-show="page === 'accounts'" x-transition.opacity>
       <header class="mb-8 flex justify-between items-center">
@@ -2537,6 +2641,58 @@
         <button @click="addTransaction()" class="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition text-sm">
           ✓ إضافة
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Debt Modal -->
+  <div x-show="showDebtModal" @click.self="showDebtModal = false" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" x-transition>
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6" @click.stop>
+      <div class="flex items-center justify-between mb-6">
+        <h2 class="text-xl font-bold text-gray-900">🤝 إضافة دين جديد</h2>
+        <button @click="showDebtModal = false" class="text-gray-400 hover:text-gray-600">✕</button>
+      </div>
+      
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">اسم الشخص</label>
+          <input type="text" x-model="newDebt.party" placeholder="محمد أحمد" class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+        </div>
+        
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">نوع الدين</label>
+          <div class="grid grid-cols-2 gap-3">
+            <button type="button" @click="newDebt.type = 'owed_to_me'"
+                    :class="newDebt.type === 'owed_to_me' ? 'bg-green-100 border-green-500 text-green-700' : 'bg-gray-50 border-gray-200 text-gray-600'"
+                    class="px-4 py-3 rounded-lg border-2 font-medium transition">
+              🟢 لي عنده (مستحق)
+            </button>
+            <button type="button" @click="newDebt.type = 'i_owe'"
+                    :class="newDebt.type === 'i_owe' ? 'bg-red-100 border-red-500 text-red-700' : 'bg-gray-50 border-gray-200 text-gray-600'"
+                    class="px-4 py-3 rounded-lg border-2 font-medium transition">
+              🔴 عليّ له (دين)
+            </button>
+          </div>
+        </div>
+        
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">المبلغ (SAR)</label>
+          <input type="number" x-model="newDebt.amount" placeholder="0.00" step="0.01" min="0" class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+        </div>
+        
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">الوصف (اختياري)</label>
+          <input type="text" x-model="newDebt.description" placeholder="سبب الدين..." class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+        </div>
+        
+        <div class="flex gap-3 pt-4">
+          <button @click="showDebtModal = false" class="flex-1 px-6 py-3 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition">
+            إلغاء
+          </button>
+          <button @click="addDebt()" class="flex-1 px-6 py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition">
+            ✓ حفظ
+          </button>
+        </div>
       </div>
     </div>
   </div>

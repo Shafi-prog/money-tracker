@@ -45,30 +45,41 @@ function getAccountInfo_(accountKey) {
   var data = sh.getRange(2, 1, lastRow - 1, 9).getValues();
   var rawKey = String(accountKey || '').trim().toLowerCase();
   
-  // Clean key: remove asterisks and leading zeros
-  var cleanKey = rawKey.replace(/^\*+/, '').replace(/^0+/, '');
+  // Clean key: remove asterisks, leading zeros, and whitespace
+  var cleanKey = rawKey.replace(/^\*+/, '').replace(/^0+/, '').trim();
+  
+  // ✅ Also try getting just last 4 digits if key is longer
+  var last4Key = cleanKey.length > 4 ? cleanKey.slice(-4) : cleanKey;
   
   for (var i = 0; i < data.length; i++) {
     var rowName = String(data[i][0] || '').trim().toLowerCase();  // Account Name
     var rowNum = String(data[i][2] || '').trim().toLowerCase();   // Account Number
     var aliasesStr = String(data[i][8] || '').toLowerCase();      // Aliases
-    var aliases = aliasesStr.split(',').map(function(s) { return s.trim(); });
+    var aliases = aliasesStr.split(/[,;]+/).map(function(s) { return s.trim(); });
     
     // Check name or number (exact match)
     if (rowName === rawKey || rowNum === rawKey || rowName === cleanKey || rowNum === cleanKey) {
        return buildInfo_(data[i], i + 2);
     }
     
+    // ✅ Also check last 4 digits match
+    if (last4Key && (rowNum === last4Key || rowNum.slice(-4) === last4Key)) {
+       return buildInfo_(data[i], i + 2);
+    }
+    
     // Check aliases (exact match against cleaned or raw)
     for (var j = 0; j < aliases.length; j++) {
       var alias = aliases[j];
-      var aliasClean = alias.replace(/^\*+/, '').replace(/^0+/, '');
+      var aliasClean = alias.replace(/^\*+/, '').replace(/^0+/, '').trim();
       
-      if (alias === rawKey || alias === cleanKey || aliasClean === cleanKey) {
+      if (alias === rawKey || alias === cleanKey || aliasClean === cleanKey || aliasClean === last4Key) {
         return buildInfo_(data[i], i + 2);
       }
     }
   }
+  
+  // ✅ Log miss for debugging
+  Logger.log('⚠️ getAccountInfo_: No match found for key: ' + accountKey + ' (cleaned: ' + cleanKey + ', last4: ' + last4Key + ')');
   
   return null;
 }
@@ -359,18 +370,54 @@ function findAccountByNameOrBank_(text) {
 function updateBalancesAfterTransaction_(data) {
   try {
     if (!data) return;
+    
+    // ✅ FIX: Try multiple keys - accNum, cardNum, account
     var accKey = data.accNum || data.cardNum || data.account;
-    if (!accKey) return;
+    
+    // If accKey is empty or generic, try to find by cardNum separately
+    if (!accKey && data.cardNum) {
+      accKey = data.cardNum;
+    }
+    
+    if (!accKey) {
+      Logger.log('⚠️ updateBalancesAfterTransaction_: No account key provided');
+      return;
+    }
+    
+    // ✅ FIX: Ensure we clean the key
+    accKey = String(accKey).trim();
     
     var amount = Number(data.amount) || 0;
     var isIncoming = !!data.isIncoming;
-    var authBalance = (data.currentBalance !== undefined) ? data.currentBalance : null;
+    var authBalance = (data.currentBalance !== undefined && data.currentBalance !== null) ? data.currentBalance : null;
+    
+    Logger.log('💰 Updating balance for account: ' + accKey + ', amount: ' + amount + ', isIncoming: ' + isIncoming);
+    
+    // ✅ FIX: Verify account exists before updating
+    var accInfo = getAccountInfo_(accKey);
+    if (!accInfo) {
+      Logger.log('⚠️ Account not found for key: ' + accKey + ' - attempting to find by aliases');
+      // Try with just last 4 digits if it's longer
+      if (accKey.length > 4) {
+        var last4 = accKey.slice(-4);
+        accInfo = getAccountInfo_(last4);
+        if (accInfo) accKey = last4;
+      }
+    }
+    
+    if (!accInfo) {
+      Logger.log('❌ Balance update FAILED: Account not found for any key variant of: ' + accKey);
+      return null;
+    }
     
     // 1. Update Balance
     var newBalance = applyTxnToBalance_(accKey, amount, isIncoming, authBalance);
+    Logger.log('✅ New balance for ' + accKey + ': ' + newBalance);
     
-    // 2. Identification for Notifications
-    var accInfo = getAccountInfo_(accKey);
+    // 2. Invalidate cache so subsequent reads get fresh data
+    if (typeof invalidateCache_ === 'function') {
+      invalidateCache_(CACHE_KEYS.BALANCES_INDEX);
+    }
     
     // 3. Notification (if enabled)
     if (accInfo && accInfo.isMine) {

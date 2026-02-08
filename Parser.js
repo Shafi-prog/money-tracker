@@ -147,14 +147,17 @@ function identifyAccounts_(text, knownAccounts) {
   var ownAccounts = (knownAccounts || ENV.OWN_ACCOUNTS || '').split(',').map(function(a) {
     return a.trim();
   }).filter(Boolean);
-  
+
   var result = {
     userAccount: '',
     merchantAccount: '',
     userCard: '',
-    merchantCard: ''
+    merchantCard: '',
+    allUserAccounts: [],
+    allUserCards: [],
+    isInternalTransfer: false
   };
-  
+
   // Extract all account numbers from text
   var allAccounts = [];
   var accountMatches = text.match(/(?:حساب|account|acc|رقم)\s*[:#]?\s*(\d{4,})/gi);
@@ -164,7 +167,7 @@ function identifyAccounts_(text, knownAccounts) {
       if (num) allAccounts.push(num[1]);
     });
   }
-  
+
   // Extract all card numbers
   var allCards = [];
   var cardMatches = text.match(/(?:بطاقة|بطاقه|card|كارت)\s*[:#]?\s*(\d{4,})/gi);
@@ -174,36 +177,43 @@ function identifyAccounts_(text, knownAccounts) {
       if (num) allCards.push(num[1]);
     });
   }
-  
-  // Identify user's vs merchant's
+
+  // Identify user's vs merchant's, and collect all user-owned
   allAccounts.forEach(function(acc) {
     if (ownAccounts.indexOf(acc) >= 0 || ownAccounts.indexOf(acc.slice(-4)) >= 0) {
-      result.userAccount = acc;
+      result.userAccount = result.userAccount || acc;
+      result.allUserAccounts.push(acc);
     } else {
       result.merchantAccount = acc;
     }
   });
-  
+
   allCards.forEach(function(card) {
     if (ownAccounts.indexOf(card.slice(-4)) >= 0) {
-      result.userCard = card;
+      result.userCard = result.userCard || card;
+      result.allUserCards.push(card);
     } else {
       result.merchantCard = card;
     }
   });
-  
+
+  // If two or more user accounts/cards found, flag as internal transfer
+  if ((result.allUserAccounts.length + result.allUserCards.length) >= 2) {
+    result.isInternalTransfer = true;
+  }
+
   // If only one account found and it's not in known list, check context
   if (allAccounts.length === 1 && !result.userAccount) {
     var isOutgoing = /خصم|صادر|شراء|سحب|pos/i.test(text);
     var isIncoming = /وارد|إيداع|استلام|راتب/i.test(text);
-    
+
     if (isOutgoing) {
       result.userAccount = allAccounts[0]; // Debit from user account
     } else if (isIncoming) {
       result.merchantAccount = allAccounts[0]; // Credit from merchant
     }
   }
-  
+
   return result;
 }
 
@@ -228,14 +238,31 @@ function callAiHybridEnhanced(text, context) {
   ai.merchantAccount = accounts.merchantAccount;
   ai.userCard = accounts.userCard || ai.cardNum;
   ai.merchantCard = accounts.merchantCard;
-  
+  ai.isInternalTransfer = accounts.isInternalTransfer;
+  ai.allUserAccounts = accounts.allUserAccounts;
+  ai.allUserCards = accounts.allUserCards;
+
+  if (accounts.isInternalTransfer) {
+    ai.category = 'حوالة داخلية';
+    ai.type = 'تحويل داخلي';
+    ai.isInternal = true;
+  }
+
   if (extractedBalance !== null) {
       ai.currentBalance = extractedBalance;
   }
-  
+
   // Apply classifier with enhanced data
   ai = applyClassifierMap_(text, ai);
-  
+
+  // Force category to 'محافظ' if merchant is D360 and category is 'أخرى'
+  if (ai && ai.merchant && ai.category && ai.category === 'أخرى') {
+    var merchantNorm = String(ai.merchant).replace(/[^A-Za-z0-9\u0600-\u06FF]/g, '').toLowerCase();
+    if (merchantNorm === 'd360') {
+      ai.category = 'محافظ';
+    }
+  }
+
   return ai;
 }
 

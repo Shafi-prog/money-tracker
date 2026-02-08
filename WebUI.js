@@ -70,6 +70,21 @@ function SOV1_UI_doGet_(e) {
         } catch (ex) {
           result = "Error executing PARSE_AI: " + ex.message;
         }
+      } else if (cmd === 'PROCESS_TRANSACTION') {
+        // Full transaction processing - simulates Telegram paste
+        try {
+          var smsText = e.parameter.smsText ? decodeURIComponent(e.parameter.smsText) : '';
+          if (!smsText) {
+            result = JSON.stringify({ success: false, error: 'smsText parameter required' });
+          } else if (typeof processTransaction === 'function') {
+            var txResult = processTransaction(smsText, 'CLI_TEST', ENV.CHAT_ID || '');
+            result = JSON.stringify({ success: true, result: txResult });
+          } else {
+            result = JSON.stringify({ success: false, error: 'processTransaction function not found' });
+          }
+        } catch (ex) {
+          result = JSON.stringify({ success: false, error: 'Error: ' + ex.message });
+        }
       } else if (cmd === 'RUN_MASTER_VERIFICATION') {
          result = (typeof RUN_MASTER_VERIFICATION === 'function') ? JSON.stringify(RUN_MASTER_VERIFICATION()) : "Function RUN_MASTER_VERIFICATION not found.";
       } else if (cmd === 'RUN_COMPLETE_SYSTEM_TEST') {
@@ -111,6 +126,27 @@ function SOV1_UI_doGet_(e) {
            result = "All System Triggers Setup Complete (Queue + Reports)";
          } else {
            result = "Function setupTimeTriggers not found.";
+         }
+      } else if (cmd === 'SEND_DAILY_REPORT') {
+         if (typeof dailyReport === 'function') {
+           dailyReport();
+           result = JSON.stringify({ success: true, message: 'Daily report sent' });
+         } else {
+           result = JSON.stringify({ success: false, error: 'dailyReport function not found' });
+         }
+      } else if (cmd === 'SEND_WEEKLY_REPORT') {
+         if (typeof weeklyReport === 'function') {
+           weeklyReport();
+           result = JSON.stringify({ success: true, message: 'Weekly report sent' });
+         } else {
+           result = JSON.stringify({ success: false, error: 'weeklyReport function not found' });
+         }
+      } else if (cmd === 'SEND_MONTHLY_REPORT') {
+         if (typeof monthlyReport === 'function') {
+           monthlyReport();
+           result = JSON.stringify({ success: true, message: 'Monthly report sent' });
+         } else {
+           result = JSON.stringify({ success: false, error: 'monthlyReport function not found' });
          }
       } else if (cmd === 'DELETE_QUEUE_TRIGGER' || cmd === 'REMOVE_QUEUE_TRIGGER') {
          try {
@@ -247,6 +283,177 @@ function SOV1_UI_doGet_(e) {
          var sheets = ss.getSheets();
          var names = sheets.map(function(s) { return s.getName() + " (" + s.getLastRow() + " rows)"; });
          result = JSON.stringify(names);
+      } else if (cmd === 'GET_RAW_BALANCES') {
+         if (typeof getAllBalances_ === 'function') {
+           var bals = getAllBalances_();
+           // Convert object to array for easier JSON reading
+           var arr = [];
+           for (var k in bals) {
+             if (bals.hasOwnProperty(k)) {
+               arr.push({ 
+                 account: k, 
+                 name: bals[k].name, 
+                 balance: bals[k].balance, 
+                 bank: bals[k].bank 
+               });
+             }
+           }
+           result = JSON.stringify(arr);
+         } else {
+           result = "Function getAllBalances_ not found.";
+         }
+      } else if (cmd === 'GET_RECENT_TRANSACTIONS') {
+         // Get last N transactions from Sheet1 to debug linkage
+         var count = parseInt(e.parameter.count || 10);
+         var s1 = _sheet('Sheet1');
+         var last = s1.getLastRow();
+         if (last < 2) {
+           result = "[]";
+         } else {
+           var startRow = Math.max(2, last - count + 1);
+           var rows = s1.getRange(startRow, 1, last - startRow + 1, 13).getValues();
+           var txns = rows.map(function(r, idx) {
+             return {
+               row: startRow + idx,
+               uuid: r[0],
+               date: r[1] instanceof Date ? r[1].toISOString() : r[1],
+               source: r[5],
+               accNum: r[6],
+               cardNum: r[7],
+               amount: r[8],
+               merchant: r[9],
+               category: r[10],
+               type: r[11],
+               raw: String(r[12] || '').slice(0, 500)  // Include raw SMS text
+             };
+           });
+           result = JSON.stringify(txns);
+         }
+      } else if (cmd === 'GET_ACCOUNTS_SHEET') {
+         // Raw accounts sheet data
+         var accSh = _sheet('Accounts');
+         var accLast = accSh.getLastRow();
+         if (accLast < 2) {
+           result = "[]";
+         } else {
+           var accRows = accSh.getRange(2, 1, accLast - 1, 11).getValues();
+           var accs = accRows.map(function(r, idx) {
+             return {
+               row: idx + 2,
+               name: r[0],
+               type: r[1],
+               number: r[2],
+               bank: r[3],
+               balance: r[4],
+               lastUpdate: r[5] instanceof Date ? r[5].toISOString() : r[5],
+               isMine: r[6],
+               isInternal: r[7],
+               aliases: r[8],
+               notes: r[9],
+               openingBalance: r[10]
+             };
+           });
+           result = JSON.stringify(accs);
+         }
+      } else if (cmd === 'REBUILD_BALANCES') {
+         // Rebuild all balances from transaction history
+         if (typeof rebuildBalancesFromHistory === 'function') {
+           var rebuildResult = rebuildBalancesFromHistory();
+           result = JSON.stringify({ success: true, message: rebuildResult });
+         } else {
+           result = JSON.stringify({ success: false, error: "rebuildBalancesFromHistory not found" });
+         }
+      } else if (cmd === 'ADD_CARD_ALIAS') {
+         // Add a card alias to an existing account
+         // Usage: &account=1626&card=4912
+         var accNum = e.parameter.account;
+         var cardAlias = e.parameter.card;
+         if (!accNum || !cardAlias) {
+           result = JSON.stringify({ success: false, error: "Missing account or card parameter" });
+         } else {
+           var accSh = _sheet('Accounts');
+           var accLast = accSh.getLastRow();
+           var found = false;
+           if (accLast >= 2) {
+             var accRows = accSh.getRange(2, 1, accLast - 1, 9).getValues();
+             for (var i = 0; i < accRows.length; i++) {
+               if (String(accRows[i][2]) === String(accNum)) {
+                 // Found the account - add alias
+                 var currentAliases = String(accRows[i][8] || '');
+                 if (currentAliases.indexOf(cardAlias) === -1) {
+                   var newAliases = currentAliases ? currentAliases + ',' + cardAlias : cardAlias;
+                   accSh.getRange(i + 2, 9).setValue(newAliases);
+                   found = true;
+                   result = JSON.stringify({ success: true, account: accNum, newAliases: newAliases });
+                 } else {
+                   result = JSON.stringify({ success: true, message: "Alias already exists", account: accNum });
+                 }
+                 break;
+               }
+             }
+           }
+           if (!found && result.indexOf('success') === -1) {
+             result = JSON.stringify({ success: false, error: "Account not found: " + accNum });
+           }
+         }
+      } else if (cmd === 'REMOVE_CARD_ALIAS') {
+         // Remove a card alias from an account
+         // Usage: &account=9767&card=4912
+         var accNum = e.parameter.account;
+         var cardAlias = e.parameter.card;
+         if (!accNum || !cardAlias) {
+           result = JSON.stringify({ success: false, error: "Missing account or card parameter" });
+         } else {
+           var accSh = _sheet('Accounts');
+           var accLast = accSh.getLastRow();
+           var found = false;
+           if (accLast >= 2) {
+             var accRows = accSh.getRange(2, 1, accLast - 1, 9).getValues();
+             for (var i = 0; i < accRows.length; i++) {
+               if (String(accRows[i][2]) === String(accNum)) {
+                 var currentAliases = String(accRows[i][8] || '');
+                 var aliasArr = currentAliases.split(',').map(function(s){ return s.trim(); });
+                 var newArr = aliasArr.filter(function(a){ return a !== cardAlias; });
+                 var newAliases = newArr.join(',');
+                 accSh.getRange(i + 2, 9).setValue(newAliases);
+                 found = true;
+                 result = JSON.stringify({ success: true, account: accNum, removed: cardAlias, newAliases: newAliases });
+                 break;
+               }
+             }
+           }
+           if (!found) {
+             result = JSON.stringify({ success: false, error: "Account not found: " + accNum });
+           }
+         }
+      } else if (cmd === 'SET_BALANCE') {
+         // Set balance for an account directly
+         // Usage: &account=9767&balance=1832.40
+         var accNum = e.parameter.account;
+         var newBal = parseFloat(e.parameter.balance);
+         if (!accNum || isNaN(newBal)) {
+           result = JSON.stringify({ success: false, error: "Missing account or balance parameter" });
+         } else {
+           var accSh = _sheet('Accounts');
+           var accLast = accSh.getLastRow();
+           var found = false;
+           if (accLast >= 2) {
+             var accRows = accSh.getRange(2, 1, accLast - 1, 5).getValues();
+             for (var i = 0; i < accRows.length; i++) {
+               if (String(accRows[i][2]) === String(accNum)) {
+                 accSh.getRange(i + 2, 5).setValue(newBal); // Column 5 = Balance
+                 accSh.getRange(i + 2, 6).setValue(new Date()); // Column 6 = LastUpdate
+                 accSh.getRange(i + 2, 11).setValue(newBal); // Column 11 = Opening Balance (sync)
+                 found = true;
+                 result = JSON.stringify({ success: true, account: accNum, newBalance: newBal });
+                 break;
+               }
+             }
+           }
+           if (!found) {
+             result = JSON.stringify({ success: false, error: "Account not found: " + accNum });
+           }
+         }
 
       } else if (cmd === 'FIX_ACCOUNT_BALANCE') {
          var accNum = e.parameter.num;
@@ -905,6 +1112,69 @@ function SOV1_UI_doGet_(e) {
              result = JSON.stringify({ success: false, error: "detectBankFromSMS_ not found" });
            }
          } catch (ex) { result = "Error: " + ex.message; }
+      
+      // ===== أوامر Telegram =====
+      } else if (cmd === 'CHECK_WEBHOOK_STATUS') {
+         try {
+           if (typeof CHECK_WEBHOOK_STATUS === 'function') {
+             var info = CHECK_WEBHOOK_STATUS();
+             result = JSON.stringify(info);
+           } else {
+             result = JSON.stringify({ success: false, error: "CHECK_WEBHOOK_STATUS not found" });
+           }
+         } catch (ex) { result = "Error: " + ex.message; }
+      } else if (cmd === 'GET_BOT_COMMANDS') {
+         try {
+           if (typeof SOV1_getMyCommands_ === 'function') {
+             var cmds = SOV1_getMyCommands_();
+             result = JSON.stringify(cmds);
+           } else {
+             result = JSON.stringify({ success: false, error: "SOV1_getMyCommands_ not found" });
+           }
+         } catch (ex) { result = "Error: " + ex.message; }
+      } else if (cmd === 'UPDATE_BOT_COMMANDS') {
+         try {
+           if (typeof SETUP_BOT_COMMANDS === 'function') {
+             var setupResult = SETUP_BOT_COMMANDS();
+             result = JSON.stringify({ success: true, result: setupResult });
+           } else {
+             result = JSON.stringify({ success: false, error: "SETUP_BOT_COMMANDS not found" });
+           }
+         } catch (ex) { result = "Error: " + ex.message; }
+      } else if (cmd === 'TEST_TELEGRAM_COMMAND') {
+         // Test a Telegram command: &text=/today
+         try {
+           var cmdText = e.parameter.text ? decodeURIComponent(e.parameter.text) : '/start';
+           var chatId = e.parameter.chat || (typeof getHubChatId_ === 'function' ? getHubChatId_() : '');
+           if (typeof handleTelegramCommand_ === 'function') {
+             var cmdResult = handleTelegramCommand_(chatId, cmdText, {});
+             result = JSON.stringify({ success: true, command: cmdText, chatId: chatId, result: cmdResult });
+           } else {
+             result = JSON.stringify({ success: false, error: "handleTelegramCommand_ not found" });
+           }
+         } catch (ex) { result = "Error: " + ex.message; }
+      } else if (cmd === 'LIST_TELEGRAM_COMMANDS') {
+         // List all available Telegram commands in the system
+         var commands = [
+           { command: '/start', description: '🚀 بدء البوت وإظهار القائمة' },
+           { command: '/menu', description: '📊 إظهار لوحة التحكم' },
+           { command: '/menu_off', description: '❌ إخفاء لوحة التحكم' },
+           { command: '/today', description: '📅 تقرير اليوم' },
+           { command: '/week', description: '🗓️ تقرير الأسبوع' },
+           { command: '/month', description: '🗓️ تقرير الشهر' },
+           { command: '/budgets', description: '📋 ملخص الميزانيات' },
+           { command: '/balances', description: '💳 أرصدة الحسابات' },
+           { command: '/setbalance', description: '💰 تحديث رصيد: /setbalance رقم الرصيد' },
+           { command: '/last', description: '🧾 آخر 5 عمليات' },
+           { command: '/search', description: '🔎 بحث: /search كلمة' },
+           { command: '/add', description: '➕ إدخال يدوي: /add مبلغ|جهة|تصنيف' },
+           { command: '/status', description: '⚙️ حالة النظام' },
+           { command: '/help', description: '❓ مساعدة وتعليمات' },
+           { command: '/debts', description: '🤝 ملخص الديون' },
+           { command: '/test', description: '✅ اختبار الاتصال' }
+         ];
+         result = JSON.stringify({ success: true, commands: commands, total: commands.length });
+
       } else {
         result = "Unknown command: " + cmd;
       }
@@ -2579,6 +2849,91 @@ function SOV1_UI_getAccounts() {
   } catch (e) {
     Logger.log('Error in SOV1_UI_getAccounts: ' + e);
     return [];
+  }
+}
+
+/**
+ * جلب ملخص الديون من Debt_Ledger
+ */
+function SOV1_UI_getDebts() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('Debt_Ledger');
+    
+    if (!sheet || sheet.getLastRow() < 2) {
+      return [];
+    }
+    
+    var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 8).getValues();
+    // Columns: UUID, Date, Party, Debit, Credit, Balance, Description, ParentUUID
+    
+    // Aggregate by party
+    var byParty = {};
+    for (var i = 0; i < data.length; i++) {
+      var party = String(data[i][2] || '').trim();
+      if (!party) continue;
+      
+      var debit = Number(data[i][3]) || 0;  // Money owed TO me
+      var credit = Number(data[i][4]) || 0; // Money I owe
+      
+      if (!byParty[party]) {
+        byParty[party] = { party: party, debit: 0, credit: 0, balance: 0 };
+      }
+      byParty[party].debit += debit;
+      byParty[party].credit += credit;
+    }
+    
+    // Convert to array and calculate balance
+    var result = [];
+    for (var p in byParty) {
+      if (!byParty.hasOwnProperty(p)) continue;
+      var d = byParty[p];
+      d.balance = d.debit - d.credit; // Positive = owed to me, Negative = I owe
+      result.push(d);
+    }
+    
+    // Sort by absolute balance
+    result.sort(function(a, b) { return Math.abs(b.balance) - Math.abs(a.balance); });
+    
+    return result;
+  } catch (e) {
+    Logger.log('Error in SOV1_UI_getDebts: ' + e);
+    return [];
+  }
+}
+
+/**
+ * إضافة دين جديد
+ */
+function SOV1_UI_addDebt(debtData) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('Debt_Ledger');
+    
+    if (!sheet) {
+      sheet = ss.insertSheet('Debt_Ledger');
+      sheet.getRange(1, 1, 1, 8).setValues([['UUID', 'Date', 'Party', 'Debit', 'Credit', 'Balance', 'Description', 'ParentUUID']]);
+      sheet.setFrozenRows(1);
+    }
+    
+    var uuid = Utilities.getUuid();
+    var now = new Date();
+    var party = String(debtData.party || '').trim();
+    var amount = Math.abs(Number(debtData.amount) || 0);
+    var type = debtData.type || 'owed_to_me';
+    var description = debtData.description || '';
+    
+    // Debit = money owed TO me, Credit = money I owe
+    var debit = (type === 'owed_to_me') ? amount : 0;
+    var credit = (type === 'i_owe') ? amount : 0;
+    var balance = debit - credit;
+    
+    sheet.appendRow([uuid, now, party, debit, credit, balance, description, '']);
+    
+    return { success: true, uuid: uuid };
+  } catch (e) {
+    Logger.log('Error in SOV1_UI_addDebt: ' + e);
+    return { success: false, error: e.message };
   }
 }
 

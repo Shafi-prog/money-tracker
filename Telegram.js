@@ -279,7 +279,7 @@ function getMonthlySpendFor_(merchantOrCategory, type) {
 }
 
 /** ===== بطاقة عملية (تُستدعى من Flow) ===== */
-function sendTransactionReport(ai, sync, src, raw, destChatId) {
+function sendTransactionReport_Legacy(ai, sync, src, raw, destChatId) {
   var hub = String(destChatId || getHubChatId_() || '');
   if (!hub) return;
 
@@ -388,6 +388,7 @@ function sendTransactionReport(ai, sync, src, raw, destChatId) {
   // ===== التنسيق الجديد (Sleek SMS Style) =====
   var opEmoji = isIncoming ? '💰' : (isTransfer ? '🔄' : '💸');
   var header = opEmoji + ' <b>' + escHtml_(operationType) + '</b>';
+  var partyValue = merchant; // Defined for compatibility
   
   var html = header + '\n';
   html += 'بـ <b>' + amount.toFixed(2) + ' SAR</b> ';

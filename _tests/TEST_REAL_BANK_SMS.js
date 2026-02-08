@@ -757,6 +757,34 @@ var REAL_SMS_TESTS = [
       amount: 21000.00,
       account: '1626'
     }
+  },
+  {
+    id: 61,
+    bank: 'الراجحي',
+    sms: 'اضافة باستخدام آبل باى\nمبلغ:SAR 700\nبطاقة:*4912 - mada\nإلى:*7815\nفي:05/02/2026 14:58:48',
+    expected: {
+      category: 'شحن رصيد',
+      type: 'إضافة',
+      isIncoming: true,
+      amount: 700.00,
+      merchant: 'D360',
+      card: '4912',
+      account: '3449'
+    }
+  },
+  {
+    id: 62,
+    bank: 'الراجحي',
+    sms: 'شراء انترنت\nعبر:4912;مدى-ابل باي\nمن:9767\nبـSAR 700 \nلـD360\n؜5/2/26 14:58',
+    expected: {
+      category: 'محافظ',
+      type: 'شحن رصيد',
+      isIncoming: false,
+      amount: 700.00,
+      merchant: 'D360',
+      account: '9767',
+      card: '4912'
+    }
   }
 ];
 

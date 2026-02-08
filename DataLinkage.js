@@ -361,6 +361,7 @@ function extractToAccountFromText_(text) {
   var patterns = [
     /الى[::]?\s*[^0-9]*(\d{4})/i,
     /لـ\s*(\d{4})/i,
+    /لدى\s*([A-Za-z0-9\-]+)/i,
     /To.*?(\d{4})/i
   ];
   

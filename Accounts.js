@@ -161,7 +161,7 @@ function SETUP_MY_ACCOUNTS() {
     // 4. D360 (1 Account + 1 Card) -> Single Entity
     // ════════════════════════════════════════════════════════════════════════════════
     // Note: User provided Card 3449 only. Treating as the main identifier.
-    ['D360', 'بنك', '3449', 'D360', 0, new Date(), 'TRUE', 'FALSE', 'D360,d360,دي 360', 'حساب/بطاقة 3449'],
+    ['D360', 'بنك', '3449', 'D360', 0, new Date(), 'TRUE', 'FALSE', 'D360,d360,دي 360,7815', 'حساب/بطاقة 3449'],
 
     // ════════════════════════════════════════════════════════════════════════════════
     // 5, 6, 7. Alrajhi (3 Separate Accounts)
@@ -521,7 +521,7 @@ function RESET_ACCOUNTS_CANONICAL_() {
     // 4. D360 (1 Account + 1 Card) -> Single Entity
     // ════════════════════════════════════════════════════════════════════════════════
     // Note: User provided Card 3449 only. Treating as the main identifier.
-    ['D360', 'بنك', '3449', 'D360', 0, new Date(), 'TRUE', 'FALSE', 'D360,d360,دي 360', 'حساب/بطاقة 3449'],
+    ['D360', 'بنك', '3449', 'D360', 0, new Date(), 'TRUE', 'FALSE', 'D360,d360,دي 360,7815', 'حساب/بطاقة 3449'],
 
     // ════════════════════════════════════════════════════════════════════════════════
     // 5, 6, 7. Alrajhi (3 Separate Accounts)

@@ -264,9 +264,10 @@ function processTransaction(smsText, source, destChatId) {
 
     // 5) sync - ✅ استخدام نظام UUID الجديد إذا متاح
     var sync;
-    if (typeof insertTransaction_ === 'function') {
+    // FIXED: Force use of saveTransaction for reliable balance updates
+    /* if (typeof insertTransaction_ === 'function') {
       sync = insertTransaction_(ai, source, smsText);
-    } else {
+    } else { */
       // Pass the extracted current balance to saveTransaction
       if (ai.currentBalance !== undefined && ai.currentBalance !== null) {
           if (!ai.extra) ai.extra = {};
@@ -274,7 +275,7 @@ function processTransaction(smsText, source, destChatId) {
           Logger.log('Passing authoritative balance to saveTransaction: ' + ai.currentBalance);
       }
       sync = saveTransaction(ai, smsText, source);
-    }
+    /* } */
 
     // 6) send report
     try {

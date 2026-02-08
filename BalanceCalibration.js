@@ -91,8 +91,24 @@ function CALIBRATE_BALANCES_MASTER() {
       fixedCount++;
       // Note: The Tiqmo INCOME is handled by the tap*Tameeni row that comes after
     }
-    
-    // Rule 7: tap*Tameeni on 0305 after Tiqmo topup is actually the RECEIVED side
+
+    // Rule 6b: "شراء انترنت" from 9767 to D360 -> EXPENSE from 9767 (D360 income handled separately)
+    if (raw.indexOf('من:9767') !== -1 && /لـ\s*D360/i.test(raw)) {
+      sTransactions.getRange(i+1, 7).setValue('9767');
+      sTransactions.getRange(i+1, 12).setValue('expense');
+      log.push('Row ' + (i+1) + ': D360 topup from 9767 marked as expense');
+      fixedCount++;
+    }
+
+    // Rule 7: D360 topup / ADD detected (e.g., "اضافة ... الى:*7815" or "لدىD360") -> This is INCOME to D360
+    if ((raw.indexOf('لـD360') !== -1 || /لدى\s*D360/i.test(raw) || raw.indexOf('الى:*7815') !== -1 || /الى[:\s]*\*?7815/.test(raw)) && currentAcc !== '3449') {
+      sTransactions.getRange(i+1, 7).setValue('3449');
+      sTransactions.getRange(i+1, 12).setValue('دخل'); // Type = Income
+      log.push('Row ' + (i+1) + ': D360 topup detected - marked as income to 3449');
+      fixedCount++;
+    }
+
+    // Rule 8: tap*Tameeni on 0305 after Tiqmo topup is actually the RECEIVED side
     // This is INCOME to Tiqmo, not an expense
     if (raw.indexOf('tap*Tameeni') !== -1 && raw.indexOf('**0305') !== -1) {
       sTransactions.getRange(i+1, 7).setValue('0305');
@@ -133,6 +149,7 @@ function CALIBRATE_BALANCES_MASTER() {
   // Also need to add aliases - IMPORTANT: Include both 0305 and 305 variants
   var aliasMap = {
     'Tiqmo': '0305,305,9682',
+    'D360': '3449,7815',
     'AlrajhiBank-9767': '9767',
     'AlrajhiBank-1626': '1626',
     'AlrajhiBank-9765': '9765',
